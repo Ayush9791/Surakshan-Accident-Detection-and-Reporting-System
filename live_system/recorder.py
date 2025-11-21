@@ -18,4 +18,3 @@ class Recorder:
         self.buffer = deque(maxlen=fps * before)
         self.recording = False
 
-        # Ensure 'clips' folder
