@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Generated local artifacts
+logs/*.log
+clips/*.mp4
+clips/*.avi
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
