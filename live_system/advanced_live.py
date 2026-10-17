@@ -1,5 +1,5 @@
 """Advanced live monitoring entry point."""
-import os
+import uuid
 import cv2
 
 from live_system.api import send_alert
@@ -12,7 +12,7 @@ from live_system.recorder import Recorder
 CAMERA_SOURCES = {
     "Camera 1": 0,
     # "Camera 2": "sample_video.mp4",
-    # "Camera 3": os.environ["SURAKSHAN_RTSP_URL"],
+    # "Camera 3": "rtsp://user:password@camera-address/stream",
 }
 
 
@@ -33,28 +33,25 @@ def main():
                 label = details["label"]
                 color = (0, 0, 255) if label == "ACCIDENT" else (0, 255, 0)
                 cv2.putText(
-                    frame,
-                    f"{cam_id}: {label} ({details['confidence']:.0%})",
-                    (20, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    color,
-                    2,
+                    frame, f"{cam_id}: {label} ({details['confidence']:.0%})",
+                    (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2,
                 )
 
                 recorder = recorders[cam_id]
-                # Append each actual frame. When an incident is active, the
-                # recorder collects real subsequent frames for the post-window.
                 recorder.add_frame(frame)
 
                 if gates[cam_id].update(label):
-                    print(f"[INCIDENT] Confirmed potential accident on {cam_id}")
-                    logger.log(cam_id)
+                    incident_id = str(uuid.uuid4())
+                    print(f"[INCIDENT] Potential accident {incident_id} on {cam_id}")
+                    logger.log(cam_id, incident_id=incident_id)
                     recorder.start_incident(cam_id)
-                    send_alert(cam_id, incident_id=None)
+                    send_alert(
+                        cam_id,
+                        incident_id=incident_id,
+                        confidence=details["accident_probability"],
+                    )
 
                 cv2.imshow(cam_id, frame)
-
             if cv2.waitKey(1) & 0xFF == 27:
                 break
     finally:
