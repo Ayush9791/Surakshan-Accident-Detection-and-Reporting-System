@@ -20,11 +20,11 @@ if not MODEL_PATH.is_file():
         "Place surakshan_model.pth in the project root or set SURAKSHAN_MODEL_PATH."
     )
 
-# weights_only=False is explicit because the new checkpoint contains metadata.
-# Older repository checkpoints contain only a state_dict and remain supported.
+# The checkpoint contains tensors and basic metadata, so safe weights-only loading is enough.
+# Older PyTorch versions without this argument use their default loader for compatibility.
 try:
-    checkpoint = torch.load(MODEL_PATH, map_location=DEVICE, weights_only=False)
-except TypeError:  # compatibility with older PyTorch versions
+    checkpoint = torch.load(MODEL_PATH, map_location=DEVICE, weights_only=True)
+except TypeError:
     checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
 
 if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
