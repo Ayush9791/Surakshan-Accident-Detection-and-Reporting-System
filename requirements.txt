@@ -3,5 +3,5 @@ torchvision
 numpy
 opencv-python
 pillow
-streamlit
+streamlit>=1.37
 requests
