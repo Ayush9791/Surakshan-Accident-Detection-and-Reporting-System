@@ -14,7 +14,6 @@ from pydantic import BaseModel, Field
 
 DB_PATH = Path(os.environ.get("SURAKSHAN_DB_PATH", "data/surakshan.db"))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-
 app = FastAPI(title="Surakshan Incident API", version="1.0.0")
 
 
@@ -33,7 +32,8 @@ def connect():
 
 
 def initialize_db():
-    with connect() as connection:
+    connection = connect()
+    try:
         connection.execute("""
             CREATE TABLE IF NOT EXISTS incidents (
                 incident_id TEXT PRIMARY KEY,
@@ -45,6 +45,9 @@ def initialize_db():
                 status TEXT NOT NULL DEFAULT 'New'
             )
         """)
+        connection.commit()
+    finally:
+        connection.close()
 
 
 initialize_db()
@@ -59,26 +62,31 @@ def health():
 def receive_alert(payload: AlertPayload):
     incident_id = payload.incident_id or str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    with connect() as connection:
+    connection = connect()
+    try:
         connection.execute(
             """INSERT OR IGNORE INTO incidents
                (incident_id, timestamp, camera_id, location, event, confidence, status)
                VALUES (?, ?, ?, ?, ?, ?, 'New')""",
-            (
-                incident_id, timestamp, payload.camera_id, payload.location,
-                payload.event, payload.confidence,
-            ),
+            (incident_id, timestamp, payload.camera_id, payload.location,
+             payload.event, payload.confidence),
         )
+        connection.commit()
+    finally:
+        connection.close()
     return {"accepted": True, "incident_id": incident_id}
 
 
 @app.get("/incidents")
 def list_incidents(limit: int = 50):
     limit = max(1, min(limit, 200))
-    with connect() as connection:
+    connection = connect()
+    try:
         rows = connection.execute(
             "SELECT incident_id, timestamp, camera_id, location, event, confidence, status "
             "FROM incidents ORDER BY timestamp DESC LIMIT ?",
             (limit,),
         ).fetchall()
+    finally:
+        connection.close()
     return {"incidents": [dict(row) for row in rows]}
