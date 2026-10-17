@@ -5,3 +5,5 @@ opencv-python
 pillow
 streamlit>=1.37
 requests
+fastapi
+uvicorn[standard]
