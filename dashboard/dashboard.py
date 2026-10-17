@@ -4,11 +4,13 @@ from pathlib import Path
 
 import cv2
 import streamlit as st
+import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from live_system.api import send_alert
 from live_system.camera import CameraStream
 from live_system.incident import IncidentGate
 from live_system.logger import AccidentLogger
@@ -70,9 +72,15 @@ def show_cameras():
             recorder = st.session_state.recorders[camera_id]
             recorder.add_frame(frame)
             if st.session_state.gates[camera_id].update(label):
-                st.session_state.logger.log(camera_id)
+                incident_id = str(uuid.uuid4())
+                st.session_state.logger.log(camera_id, incident_id=incident_id)
                 recorder.start_incident(camera_id)
-                st.sidebar.warning(f"Potential accident: {camera_id}")
+                send_alert(
+                    camera_id,
+                    incident_id=incident_id,
+                    confidence=details["accident_probability"],
+                )
+                st.sidebar.warning(f"Potential accident: {camera_id} ({incident_id[:8]})")
             st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), use_container_width=True)
             st.caption(f"{label} | model confidence {details['confidence']:.1%}")
 
