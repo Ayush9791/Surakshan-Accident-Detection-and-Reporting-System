@@ -66,9 +66,21 @@ Dashboard:
 streamlit run dashboard/dashboard.py
 ```
 
+## Run the local incident API
+
+Start the included SQLite-backed API in a separate terminal:
+
+```bash
+uvicorn live_system.server:app --host 127.0.0.1 --port 5000
+```
+
+Check `http://127.0.0.1:5000/health` and list recent incidents at `http://127.0.0.1:5000/incidents`. Records are stored in `data/surakshan.db` by default. Set `SURAKSHAN_DB_PATH` to change the database location.
+
+**Security:** The API has no authentication. Keep it bound to localhost for local demos. Do not expose it to a network or the public internet without authentication, access controls, and transport security.
+
 ## Alert endpoint
 
-The client defaults to `http://127.0.0.1:5000/alert`. This repository does not currently implement that backend, so the request fails unless a compatible service is running.
+The client defaults to `http://127.0.0.1:5000/alert`. Start the included API in a separate terminal before using alert delivery.
 
 Set another endpoint using PowerShell:
 
