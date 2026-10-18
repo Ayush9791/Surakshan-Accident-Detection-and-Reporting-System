@@ -1,69 +1,39 @@
+"""Basic single-camera live detection."""
 import cv2
-import torch
-from torchvision import transforms
-from PIL import Image
-from model import AccidentNet
-
-# ------------------------------
-# LOAD MODEL
-# ------------------------------
-device = "cuda" if torch.cuda.is_available() else "cpu"
-model = AccidentNet().to(device)
-model.load_state_dict(torch.load("surakshan_model.pth", map_location=device))
-model.eval()
-
-# ------------------------------
-# TRANSFORM
-# ------------------------------
-transform = transforms.Compose([
-    transforms.Resize((128, 128)),
-    transforms.ToTensor()
-])
-
-# ------------------------------
-# FRAME PREDICTION
-# ------------------------------
-def predict_frame(frame):
-    # BGR → RGB → PIL
-    img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-    img_t = transform(img).unsqueeze(0).to(device)
-
-    with torch.no_grad():
-        out = model(img_t)
-        pred = torch.argmax(out, 1).item()
-
-    return "ACCIDENT" if pred == 1 else "NORMAL"
+from live_system.predict import predict_frame_details
 
 
-# ------------------------------
-# START CAMERA
-# ------------------------------
-cap = cv2.VideoCapture(0)  
-# For RTSP CCTV:
-# cap = cv2.VideoCapture("rtsp://user:pass@IP:port/stream")
+def main():
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        raise RuntimeError("Could not open camera 0")
 
-print("Starting live accident detection... Press ESC to exit.")
+    print("Starting Surakshan live detection. Press ESC to exit.")
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                print("Failed to grab a camera frame.")
+                break
+            details = predict_frame_details(frame)
+            label = details["label"]
+            color = (0, 0, 255) if label == "ACCIDENT" else (0, 255, 0)
+            cv2.putText(
+                frame,
+                f"{label} ({details['confidence']:.0%})",
+                (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                color,
+                2,
+            )
+            cv2.imshow("Surakshan - Basic Live Detection", frame)
+            if cv2.waitKey(1) & 0xFF == 27:
+                break
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        print("Failed to grab frame.")
-        break
 
-    result = predict_frame(frame)
-
-    # Red if accident, Green if normal
-    color = (0, 0, 255) if result == "ACCIDENT" else (0, 255, 0)
-
-    # Put text
-    cv2.putText(frame, result, (20, 40),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, color, 3)
-
-    cv2.imshow("Surakshan - Basic Live Detection", frame)
-
-    # ESC key to quit
-    if cv2.waitKey(1) & 0xFF == 27:
-        break
-
-cap.release()
-cv2.destroyAllWindows()
+if __name__ == "__main__":
+    main()

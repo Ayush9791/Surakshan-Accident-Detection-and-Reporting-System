@@ -1,61 +1,110 @@
-import cv2
-import os
+"""Rolling-buffer incident recorder with actual post-event frames."""
 from collections import deque
+from datetime import datetime
+from pathlib import Path
+import re
+import threading
+
+import cv2
+
 
 class Recorder:
-    """
-    Saves video clips containing:
-    - 10 seconds BEFORE accident
-    - 10 seconds AFTER accident
-
-    Uses a deque buffer to store previous frames.
-    """
-
-    def __init__(self, fps=30, before=10, after=10):
+    def __init__(self, fps=30, before=10, after=10, output_dir="clips"):
+        if fps <= 0 or before < 0 or after < 0:
+            raise ValueError("fps must be positive and before/after cannot be negative")
         self.fps = fps
         self.before = before
         self.after = after
-        self.buffer = deque(maxlen=fps * before)
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.buffer = deque(maxlen=max(1, fps * before))
         self.recording = False
-
-        # Ensure 'clips' folder exists
-        if not os.path.exists("clips"):
-            os.makedirs("clips")
+        self._frames = []
+        self._target_frame_count = 0
+        self._cam_id = None
+        self._lock = threading.Lock()
+        self._writer_threads = []
 
     def add_frame(self, frame):
-        """Stores the recent frames BEFORE an accident."""
-        self.buffer.append(frame)
+        """Store a frame and append real subsequent frames during an incident."""
+        if frame is None or not hasattr(frame, "shape") or frame.size == 0:
+            return
+        frame_copy = frame.copy()
+        frames_to_write = None
+        cam_id = None
+        with self._lock:
+            if self.recording:
+                self._frames.append(frame_copy)
+                if len(self._frames) >= self._target_frame_count:
+                    frames_to_write = self._frames
+                    cam_id = self._cam_id
+                    self._frames = []
+                    self._target_frame_count = 0
+                    self._cam_id = None
+                    self.recording = False
+            self.buffer.append(frame_copy)
+        if frames_to_write is not None:
+            self._write_async(frames_to_write, cam_id)
 
-    def save_clip(self, frame, cam_id):
-        """
-        Saves a full accident video clip:
-        BEFORE + AFTER frames.
-        """
-        if self.recording:
-            return None  # Prevent double saving
+    def start_incident(self, cam_id):
+        """Freeze pre-event frames and start collecting subsequent camera frames."""
+        with self._lock:
+            if self.recording:
+                return False
+            self._cam_id = str(cam_id)
+            self._frames = list(self.buffer)
+            self._target_frame_count = len(self._frames) + self.fps * self.after
+            if self.after == 0:
+                frames, camera = self._frames, self._cam_id
+                self._frames = []
+                self._cam_id = None
+                self._target_frame_count = 0
+                self._write_async(frames, camera)
+                return True
+            self.recording = True
+        return True
 
-        self.recording = True
-
-        output_path = os.path.join("clips", f"accident_{cam_id}.mp4")
-        height, width, _ = frame.shape
-
-        writer = cv2.VideoWriter(
-            output_path,
-            cv2.VideoWriter_fourcc(*"mp4v"),
-            self.fps,
-            (width, height)
+    def _write_async(self, frames, cam_id):
+        thread = threading.Thread(
+            target=self._write_clip, args=(frames, cam_id), daemon=True,
+            name=f"clip-writer-{cam_id}",
         )
+        self._writer_threads.append(thread)
+        thread.start()
 
-        # Save BEFORE accident frames
-        for f in list(self.buffer):
-            writer.write(f)
+    def _write_clip(self, frames, cam_id):
+        if not frames:
+            return None
+        height, width = frames[0].shape[:2]
+        safe_cam = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(cam_id)).strip("._") or "camera"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        output_path = self.output_dir / f"accident_{safe_cam}_{timestamp}.mp4"
+        writer = cv2.VideoWriter(
+            str(output_path), cv2.VideoWriter_fourcc(*"mp4v"), self.fps, (width, height)
+        )
+        try:
+            if not writer.isOpened():
+                print(f"[RECORDER] Could not open video writer for {output_path}")
+                return None
+            for frame in frames:
+                if frame.shape[:2] != (height, width):
+                    frame = cv2.resize(frame, (width, height))
+                writer.write(frame)
+        finally:
+            writer.release()
+        print(f"[RECORDER] Saved incident clip: {output_path}")
+        return str(output_path)
 
-        # Save AFTER accident frames
-        for _ in range(self.fps * self.after):
-            writer.write(frame)
-
-        writer.release()
-        self.recording = False
-
-        print(f"[RECORDER] Accident clip saved → {output_path}")
-        return output_path
+    def close(self):
+        """Write a partial clip if monitoring stops during an incident."""
+        with self._lock:
+            pending = self._frames if self.recording else None
+            cam_id = self._cam_id
+            self._frames = []
+            self._cam_id = None
+            self._target_frame_count = 0
+            self.recording = False
+        if pending:
+            self._write_async(pending, cam_id)
+        for thread in list(self._writer_threads):
+            thread.join(timeout=2)

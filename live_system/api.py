@@ -1,36 +1,24 @@
+"""HTTP alert client. Configure SURAKSHAN_ALERT_URL for a real backend."""
+import os
 import requests
 
-# ----------------------------------------------
-# Change this to your own backend URL
-# Example: "https://surakshan-server.onrender.com/alert"
-# ----------------------------------------------
-API_URL = "http://localhost:5000/alert"   # placeholder URL
+API_URL = os.environ.get("SURAKSHAN_ALERT_URL", "http://127.0.0.1:5000/alert")
 
 
-def send_alert(camera_id, location="Unknown"):
-    """
-    Sends accident alert to backend.
-    You can integrate with:
-      - FastAPI backend
-      - Node.js server
-      - Discord webhook
-      - Telegram bot
-      - Firebase
-    """
-
-    data = {
+def send_alert(camera_id, location="Unknown", incident_id=None, confidence=None):
+    payload = {
         "camera_id": camera_id,
         "location": location,
-        "event": "ACCIDENT"
+        "event": "POTENTIAL_ACCIDENT",
+        "incident_id": incident_id,
+        "confidence": confidence,
     }
-
     try:
-        response = requests.post(API_URL, json=data, timeout=3)
-
-        if response.status_code == 200:
-            print(f"[API] Alert sent for {camera_id}")
-        else:
-            print(f"[API] Server responded with status: {response.status_code}")
-
-    except Exception as e:
-        print(f"[API] Failed to send alert → {e}")
+        response = requests.post(API_URL, json=payload, timeout=(2, 3))
+        if 200 <= response.status_code < 300:
+            print(f"[API] Alert accepted for {camera_id} (HTTP {response.status_code})")
+            return True
+        print(f"[API] Alert failed: HTTP {response.status_code}: {response.text[:200]}")
+    except requests.RequestException as exc:
+        print(f"[API] Alert delivery failed: {exc}")
+    return False
