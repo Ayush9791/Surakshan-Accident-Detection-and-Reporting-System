@@ -11,7 +11,10 @@ from torchvision import transforms
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from model import AccidentNet
 
-MODEL_PATH = Path(os.environ.get("SURAKSHAN_MODEL_PATH", "surakshan_model.pth"))
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+MODEL_PATH = Path(os.environ.get("SURAKSHAN_MODEL_PATH", str(PROJECT_ROOT / "surakshan_model.pth")))
+if not MODEL_PATH.is_absolute():
+    MODEL_PATH = PROJECT_ROOT / MODEL_PATH
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 if not MODEL_PATH.is_file():
