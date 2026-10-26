@@ -1,5 +1,6 @@
 """Threaded OpenCV camera reader with safe frame snapshots."""
 import threading
+import time
 
 import cv2
 
@@ -32,12 +33,19 @@ class CameraStream:
                     self.ret = True
                     self.frame = frame
                 else:
-                    # Keep the most recent valid frame available through brief
-                    # stream hiccups, but report no frame before first success.
-                    if self.frame is None:
-                        self.ret = False
+                    self.ret = False
             if not ret or frame is None:
                 self._stop_event.wait(0.05)
+
+    def wait_until_ready(self, timeout=8.0):
+        """Wait briefly for the first decoded frame after the stream opens."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline and not self._stop_event.is_set():
+            ready, _ = self.read()
+            if ready:
+                return True
+            self._stop_event.wait(0.05)
+        return False
 
     def read(self):
         with self._lock:
