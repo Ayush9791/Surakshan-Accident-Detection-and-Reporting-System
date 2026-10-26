@@ -29,3 +29,9 @@ Thumbs.db
 # OS/editor temporary files
 *.swp
 *.tmp
+
+# Node / Next.js dashboard
+node_modules/
+.next/
+out/
+coverage/

@@ -1,132 +1,130 @@
-# Surakshan: Accident Detection and Reporting System
+# Surakshan — Traffic Incident Detection and Response Platform
 
-Surakshan is an academic Python prototype that classifies video frames as **Accident** or **Non Accident**, presents live predictions, groups repeated positive predictions into potential incidents, records video evidence, and sends an HTTP alert to a local backend.
+Surakshan is a college-project prototype that combines webcam-based accident classification, incident persistence, role-based web dashboards, hospital assignment, audit logging, and simulated emergency notifications. It is designed to be demonstrated at zero cost on a Windows PC. The current CNN is a baseline and can be retrained/replaced later.
 
-> **Safety limitation:** This is a demonstration prototype, not a certified emergency-detection system. Predictions can be wrong. Treat detections as potential incidents requiring human verification. Do not use the application as the sole basis for emergency dispatch.
+> **Important:** this is not a certified emergency system. The AI can miss incidents or raise false alerts. Dispatch is simulated only; no police, ambulance, hospital, or emergency service is contacted. The API and demo accounts are not production-hardened. Do not expose the service publicly as-is.
 
-## Project modules
+## Features in this branch
 
-- `model.py`: PyTorch convolutional neural network.
-- `train.py`: training, validation, best-checkpoint selection, and held-out test metrics.
-- `live_system/basic_live.py`: basic webcam prediction preview.
-- `live_system/advanced_live.py`: temporal incident gating, event logs, video evidence, and HTTP alerts.
-- `live_system/server.py`: local FastAPI incident API backed by SQLite.
-- `dashboard/dashboard.py`: Streamlit monitoring interface.
-- `tests/`: unit tests for incident gating and evidence recording, with API tests.
+- PyTorch frame-classification baseline and existing live webcam inference pipeline.
+- Temporal incident gate to avoid triggering on a single positive frame.
+- Incident event records in SQLite.
+- Next.js/React dashboard replacing Streamlit for the operator workflow.
+- Login for **admin**, **traffic authority**, and **hospital** roles.
+- Role-based permissions: admins create authority/hospital accounts; authorities review incidents, update status, assign verified cases to a hospital, and create simulated dispatch records; hospitals only see verified/resolved cases assigned to their own organisation.
+- Password hashing using PBKDF2-HMAC-SHA256, expiring signed sessions, password change, and an admin audit trail.
+- Dashboard buttons to start/stop the Python detector on the same host as the API.
+- Optional shared detector-ingestion token for a separately configured detector client.
+- Automated Python API tests and Next.js production build workflow.
 
-## Requirements and installation
+## Free local setup (Windows PowerShell)
 
-Use Python 3.10 or newer. From the project root, create and activate a virtual environment.
+No paid service, paid API key, or cloud account is required for the college demo. Install Python 3.10 or 3.11, Node.js 20 LTS, and Git.
 
-### Windows PowerShell
+From the repository root:
 
 ```powershell
-python -m venv .venv
+py -3.10 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-If PowerShell blocks activation, you can run the environment's Python directly with `.venv\Scripts\python.exe`.
+If Python 3.10 is not installed, use a version listed by `py -0p`, such as `py -3.11`.
 
-The checked-in dataset is expected to use this structure:
+### Start the API
 
-```text
-dataset/
-  Accident/
-  Non Accident/
-```
-
-If you replace or extend the dataset, keep the two class folder names exactly as shown.
-
-## Run the project
-
-Run commands from the repository root. The checked-in `surakshan_model.pth` checkpoint is used by default. Set `SURAKSHAN_MODEL_PATH` to use a different checkpoint.
-
-### 1. Basic webcam preview
+Open Terminal 1 in the repository root:
 
 ```powershell
-python -m live_system.basic_live
-```
-
-Press **Esc** to exit. This mode only displays per-frame predictions.
-
-### 2. Advanced incident monitoring
-
-Start the local API first in one terminal:
-
-```powershell
+.\.venv\Scripts\Activate.ps1
 uvicorn live_system.server:app --host 127.0.0.1 --port 5000
 ```
 
-In another terminal, run:
+API documentation: http://127.0.0.1:5000/docs
+
+The SQLite database is created automatically at `data/surakshan.db`. Do not delete it while the API is running.
+
+### Start the web dashboard
+
+Open Terminal 2:
 
 ```powershell
-python -m live_system.advanced_live
+cd dashboard-web
+Copy-Item .env.example .env.local
+npm install
+npm run dev
 ```
 
-Press **Esc** to stop. The default alert endpoint is `http://127.0.0.1:5000/alert`. Override it with:
+Open http://localhost:3000. Keep both terminals running.
 
-```powershell
-$env:SURAKSHAN_ALERT_URL = "http://127.0.0.1:5000/alert"
-```
+### Demo logins
 
-To change the SQLite database location, set `SURAKSHAN_DB_PATH` before launching the API. For example:
+These accounts are created automatically the first time the database starts, unless matching usernames already exist.
 
-```powershell
-$env:SURAKSHAN_DB_PATH = "data/demo.db"
-uvicorn live_system.server:app --host 127.0.0.1 --port 5000
-```
+| Role | Username | Demo password |
+|---|---|---|
+| Administrator | `admin` | `Admin@12345` |
+| Traffic authority | `authority` | `Authority@12345` |
+| Hospital | `hospital` | `Hospital@12345` |
 
-API endpoints:
-- `GET /health`: service health.
-- `POST /alert`: record a potential incident.
-- `GET /incidents?limit=50`: list recent incidents.
-- `GET /docs`: interactive local API documentation.
+Change each password after logging in. The admin can create additional hospital and authority accounts in **Account management**. Hospital access is limited to verified/resolved incidents assigned to that hospital organisation. To assign a case, use the exact organisation name shown in the admin account list (the seeded hospital is `Demo General Hospital`).
 
-### 3. Streamlit dashboard
+To use different seeded passwords on a fresh database, set `SURAKSHAN_ADMIN_PASSWORD`, `SURAKSHAN_AUTHORITY_PASSWORD`, and `SURAKSHAN_HOSPITAL_PASSWORD` before first starting the API. Existing accounts are not reset when these variables change. Set `SURAKSHAN_AUTH_SECRET` to a long random value before sharing the app. The example defaults are for local demonstration only.
 
-```powershell
-streamlit run dashboard/dashboard.py
-```
+### Test the end-to-end workflow
 
-Use **Start monitoring** to begin webcam inference and **Stop monitoring** to release the camera. The dashboard uses camera 0 by default. Source configuration is in `dashboard/dashboard.py`.
+1. Sign in as `admin`.
+2. Click **Create test incident**.
+3. Select the new incident, verify it, and assign it to `Demo General Hospital`.
+4. Click **Simulate dispatch** and verify the notification appears in the dispatch log.
+5. Sign out and sign in as `hospital`. The verified incident should appear in the hospital queue.
+6. Use **Account management** to create additional authority/hospital users.
+7. Use **Start AI detector** to launch the existing Python webcam inference process on the computer running the API. It opens an OpenCV window and writes logs to `logs/detector.log`. Make sure the webcam is not in use by another application. Stop the browser preview before starting the Python detector.
+8. When a positive event passes the existing incident gate, the detector submits an incident to the API. Review it in the dashboard. Model output remains a potential incident until a human verifies it.
 
-### 4. Train and evaluate the model
+## Roles and permissions
 
-```powershell
-python train.py
-```
+- **Admin:** view all incidents; manage authority/hospital accounts; change incident status; assign incidents; view audit events; start/stop local detector; create simulated dispatch records.
+- **Traffic authority:** view incident queue; review/verify/dismiss/resolve; assign verified cases to hospitals; start/stop local detector; record simulated dispatch.
+- **Hospital:** view only verified/resolved incidents assigned to its own organisation; no global incident access or dispatch privileges.
 
-Training uses a seeded 70/15/15 image-level split and writes `surakshan_model.pth`. The script reports accuracy, precision, recall, F1, and loss.
+The current detector ingestion endpoint `POST /alert` is intended for the local detector. For a trusted network or cloud deployment, set `SURAKSHAN_DETECTOR_TOKEN` and configure the same environment variable for the detector process; the API rejects detector alerts without the matching `X-Detector-Token`. Do not expose the API publicly without HTTPS, firewalling, rate limiting, secret management, and additional security review.
 
-**Evaluation warning:** an image-level random split can leak near-duplicate frames from the same video across training and test data, producing overly optimistic metrics. The repository currently does not preserve source-video IDs needed for a reliable grouped split. Do not claim the test metrics establish real-world accident-detection accuracy. For a defensible evaluation, split by source video or scene, then test on footage not used for training or tuning.
-
-## Run tests
+## Run automated tests
 
 ```powershell
 python -m unittest discover -s tests -v
 ```
 
-GitHub Actions runs the unit suite on pushes to `main` and on pull requests. The suite checks incident-gate behaviour, video recorder frame selection, and API validation/incident persistence. Unit tests do not verify model accuracy or camera compatibility.
+Build the frontend locally:
 
-## Outputs and local data
+```powershell
+cd dashboard-web
+npm run build
+```
 
-- Potential incidents are appended to `logs/accidents.log`.
-- Recorded video clips are written to `clips/`.
-- API incident records are written to `data/surakshan.db` by default.
-- Generated local logs, clips, databases, bytecode, and virtual environments should not be committed.
+## AI model and dataset plan
 
-## Limitations and security
+The current frame-level CNN is a baseline, not a validated real-world crash detector. Training a stronger model is a separate stage.
 
-- The classifier labels the full frame; it does not localise a collision or identify individual vehicles.
-- Temporal gating suppresses repeated frame-level alerts. It is not a physical collision-understanding model.
-- The camera location is not inferred automatically; the API defaults location to `Unknown`.
-- The local API has **no authentication**. Keep it bound to `127.0.0.1`. Do not expose it to a local network or the public internet without adding authentication, access controls, and transport security.
-- Alert acceptance by the local API does not notify police, ambulance services, or other emergency responders.
-- Camera availability, performance, and MP4 encoding depend on the host hardware and its OpenCV build.
-- The live webcam/RTSP workflow and real-world model performance must be tested on the actual submission/demo machine.
+Start by benchmarking the CCTV-focused **ACCIDENT** dataset:
+- Dataset and benchmark: https://accidentbench.github.io/
+- Paper: https://openaccess.thecvf.com/content/CVPR2026W/AUTOPILOT/html/Picek_ACCIDENT_A_Benchmark_Dataset_for_Vehicle_Accident_Detection_from_Traffic_CVPRW_2026_paper.html
 
-## Academic project summary
+Recommended future approach: pretrained vehicle detector + multi-object tracker + temporal accident-recognition model. Split train/validation/test by source video or camera, include hard negative traffic events, and report event recall, false alerts per camera-hour, detection delay, and performance on unseen cameras. Check dataset licensing and annotation formats before use.
 
-Surakshan demonstrates a computer-vision pipeline that classifies frames, applies temporal confirmation to reduce repeated alerts, preserves a clip around a potential incident, records metadata in SQLite, and exposes incidents through a local API and monitoring dashboard. Its results should be presented as a prototype demonstration rather than as a validated safety-critical system.
+## Zero-cost deployment guidance
+
+For the submission deadline, **run the full demo locally**. This is the most reliable option and costs nothing. The Python detector uses the camera attached to the machine running the API; a cloud server cannot access your laptop webcam just because the browser has a preview.
+
+Optional free-tier hosting can be explored later, but providers change limits, may sleep or require billing details, and the detector still needs a reachable authorised video source. Do not make a public deployment a deadline dependency. A free cloud host is not a substitute for securing the API.
+
+## Current limitations
+
+- The existing model is frame-based; temporal crash recognition has not been trained yet.
+- The browser webcam preview is only a preview. AI inference runs in the Python detector process on the API host.
+- The detector's OpenCV window is local to the API host; it is not streamed into the web dashboard.
+- The dashboard evidence panel does not yet play saved incident clips.
+- Simulated dispatch does not contact real authorities.
+- This prototype has no production-grade HTTPS deployment, multi-factor authentication, formal password reset, or agency integration.
