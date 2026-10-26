@@ -10,25 +10,17 @@ import uuid
 import cv2
 
 from live_system.api import send_alert
-from live_system.camera import CameraStream
+from live_system.camera import CameraStream, normalize_camera_source
 from live_system.incident import IncidentGate
 from live_system.logger import AccidentLogger
 from live_system.predict import predict_frame_details
 from live_system.recorder import Recorder
 
 
-def _camera_source(value):
-    """Convert numeric camera IDs to integers; preserve file and stream URLs."""
-    value = str(value).strip()
-    if not value:
-        raise ValueError("SURAKSHAN_CAMERA_URL cannot be empty")
-    return int(value) if value.isdecimal() else value
-
-
 # Default to the local webcam. Configure IP Webcam explicitly through the
 # environment so a stale private IP never breaks a fresh checkout.
 CAMERA_SOURCES = {
-    "Camera 1": _camera_source(os.environ.get("SURAKSHAN_CAMERA_URL", "0")),
+    "Camera 1": normalize_camera_source(os.environ.get("SURAKSHAN_CAMERA_URL", "0")),
 }
 
 
