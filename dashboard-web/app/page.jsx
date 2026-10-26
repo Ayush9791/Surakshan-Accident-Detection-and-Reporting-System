@@ -50,7 +50,15 @@ export default function Dashboard() {
     if (!token || !user) return;
     try {
       const response = await authFetch("/incidents?limit=200", { cache: "no-store" });
-      if (response.status === 401) { window.localStorage.removeItem("surakshan_token"); setToken(""); setUser(null); return; }
+      if (response.status === 401) {
+        window.localStorage.removeItem("surakshan_token");
+        streamRef.current?.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+        setCameraOn(false);
+        setToken("");
+        setUser(null);
+        return;
+      }
       if (!response.ok) throw new Error("Could not load incidents");
       setIncidents((await response.json()).incidents || []);
       setApiOnline(true);
@@ -89,7 +97,12 @@ export default function Dashboard() {
 
   function logout() {
     window.localStorage.removeItem("surakshan_token");
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraOn(false);
     setToken(""); setUser(null); setIncidents([]); setDispatches([]); setUsers([]); setAudit([]);
+    setSelectedId(""); setAssignOrg(""); setNotice(""); setCameraError("");
   }
 
   async function signIn(event) {
