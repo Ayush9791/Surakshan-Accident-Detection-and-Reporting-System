@@ -27,7 +27,7 @@ DB_PATH = Path(os.environ.get("SURAKSHAN_DB_PATH", "data/surakshan.db"))
 if not DB_PATH.is_absolute():
     DB_PATH = PROJECT_ROOT / DB_PATH
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-AUTH_SECRET = os.environ.get("SURAKSHAN_AUTH_SECRET", "local-academic-demo-secret-change-before-deployment")
+AUTH_SECRET = os.environ.get("SURAKSHAN_AUTH_SECRET") or secrets.token_urlsafe(32)
 TOKEN_HOURS = 8
 DETECTOR_PROCESS = None
 DETECTOR_LOG = PROJECT_ROOT / "logs" / "detector.log"
