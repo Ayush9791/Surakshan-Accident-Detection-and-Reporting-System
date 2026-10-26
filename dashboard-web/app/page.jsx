@@ -50,7 +50,7 @@ export default function Dashboard() {
     if (!token || !user) return;
     try {
       const response = await authFetch("/incidents?limit=200", { cache: "no-store" });
-      if (response.status === 401) { logout(); return; }
+      if (response.status === 401) { window.localStorage.removeItem("surakshan_token"); setToken(""); setUser(null); return; }
       if (!response.ok) throw new Error("Could not load incidents");
       setIncidents((await response.json()).incidents || []);
       setApiOnline(true);
