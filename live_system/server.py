@@ -407,11 +407,13 @@ def detector_start(user: dict = Depends(require_roles("admin", "authority"))):
     if DETECTOR_PROCESS is not None and DETECTOR_PROCESS.poll() is None:
         return {"running": True, "message": "Detector is already running"}
     try:
+        if DETECTOR_LOG_HANDLE and not DETECTOR_LOG_HANDLE.closed:
+            DETECTOR_LOG_HANDLE.close()
         DETECTOR_LOG_HANDLE = open(DETECTOR_LOG, "a", encoding="utf-8")
         DETECTOR_PROCESS = subprocess.Popen(
             [sys.executable, "-m", "live_system.advanced_live"],
             stdin=subprocess.DEVNULL, stdout=DETECTOR_LOG_HANDLE,
-            stderr=subprocess.STDOUT, cwd=str(Path(__file__).resolve().parent.parent),
+            stderr=subprocess.STDOUT, cwd=str(PROJECT_ROOT),
         )
         db = connect()
         try:
@@ -421,6 +423,9 @@ def detector_start(user: dict = Depends(require_roles("admin", "authority"))):
             db.close()
         return {"running": True, "pid": DETECTOR_PROCESS.pid, "message": "Detector started on the API host"}
     except OSError as exc:
+        if DETECTOR_LOG_HANDLE and not DETECTOR_LOG_HANDLE.closed:
+            DETECTOR_LOG_HANDLE.close()
+        DETECTOR_LOG_HANDLE = None
         raise HTTPException(status_code=500, detail=f"Could not start detector: {exc}") from exc
 
 
@@ -428,6 +433,9 @@ def detector_start(user: dict = Depends(require_roles("admin", "authority"))):
 def detector_stop(user: dict = Depends(require_roles("admin", "authority"))):
     global DETECTOR_PROCESS, DETECTOR_LOG_HANDLE
     if DETECTOR_PROCESS is None or DETECTOR_PROCESS.poll() is not None:
+        if DETECTOR_LOG_HANDLE and not DETECTOR_LOG_HANDLE.closed:
+            DETECTOR_LOG_HANDLE.close()
+        DETECTOR_LOG_HANDLE = None
         return {"running": False, "message": "Detector is not running"}
     DETECTOR_PROCESS.terminate()
     try:
