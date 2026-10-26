@@ -1,9 +1,12 @@
 name: Web dashboard build
 
+permissions:
+  contents: write
+
 on:
   pull_request:
   push:
-    branches: [main, submission-hardening]
+    branches: [main, submission-hardening, ui/operations-dashboard-redesign]
 
 jobs:
   next-build:
@@ -18,6 +21,18 @@ jobs:
           node-version: "20"
       - name: Install dependencies
         run: npm install
+      - name: Refresh lockfile on maintenance branch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/ui/operations-dashboard-redesign'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! git diff --quiet -- package-lock.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json
+            git commit -m "chore: refresh dashboard dependency lockfile"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
       - name: Lint dashboard
         run: npm run lint
       - name: Build dashboard
