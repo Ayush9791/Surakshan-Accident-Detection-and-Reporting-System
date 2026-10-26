@@ -1,4 +1,5 @@
 """Responsive Streamlit dashboard for Surakshan."""
+import os
 import sys
 from pathlib import Path
 
@@ -11,7 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from live_system.api import send_alert
-from live_system.camera import CameraStream
+from live_system.camera import CameraStream, normalize_camera_source
 from live_system.incident import IncidentGate
 from live_system.logger import AccidentLogger
 from live_system.predict import predict_frame_details
@@ -21,7 +22,7 @@ st.set_page_config(page_title="Surakshan Dashboard", layout="wide")
 st.title("Surakshan Accident Detection Dashboard")
 st.caption("Detections are potential incidents and require human verification.")
 
-SOURCES = {"Camera 1": 0}
+SOURCES = {"Camera 1": normalize_camera_source(os.environ.get("SURAKSHAN_CAMERA_URL", "0"))}
 for key, default in (
     ("running", False), ("streams", {}), ("recorders", {}),
     ("gates", {}), ("logger", None),
@@ -43,7 +44,22 @@ def stop_monitoring():
 
 left, right = st.columns(2)
 if left.button("Start monitoring", disabled=st.session_state.running):
-    st.session_state.streams = {name: CameraStream(src) for name, src in SOURCES.items()}
+    opened_streams = {}
+    try:
+        for name, source in SOURCES.items():
+            stream = CameraStream(source)
+            if not stream.wait_until_ready(timeout=8.0):
+                stream.stop()
+                raise RuntimeError(
+                    f"Camera source {source!r} opened but no frames arrived. "
+                    "For IP Webcam, use http://PHONE_IP:8080/video."
+                )
+            opened_streams[name] = stream
+    except Exception:
+        for stream in opened_streams.values():
+            stream.stop()
+        raise
+    st.session_state.streams = opened_streams
     st.session_state.recorders = {name: Recorder() for name in SOURCES}
     st.session_state.gates = {name: IncidentGate() for name in SOURCES}
     st.session_state.running = True
