@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from pydantic import BaseModel, Field
 
 DB_PATH = Path(os.environ.get("SURAKSHAN_DB_PATH", "data/surakshan.db"))
@@ -21,7 +21,7 @@ class AlertPayload(BaseModel):
     camera_id: str = Field(min_length=1, max_length=128)
     location: str = Field(default="Unknown", max_length=256)
     event: str = Field(default="POTENTIAL_ACCIDENT", max_length=64)
-    incident_id: Optional[str] = Field(default=None, max_length=128)
+    incident_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
 
@@ -78,8 +78,7 @@ def receive_alert(payload: AlertPayload):
 
 
 @app.get("/incidents")
-def list_incidents(limit: int = 50):
-    limit = max(1, min(limit, 200))
+def list_incidents(limit: int = Query(default=50, ge=1, le=200)):
     connection = connect()
     try:
         rows = connection.execute(
