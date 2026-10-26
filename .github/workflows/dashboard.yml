@@ -18,5 +18,7 @@ jobs:
           node-version: "20"
       - name: Install dependencies
         run: npm install
+      - name: Lint dashboard
+        run: npm run lint
       - name: Build dashboard
         run: npm run build

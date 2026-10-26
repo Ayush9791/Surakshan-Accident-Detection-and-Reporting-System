@@ -7,6 +7,8 @@ import threading
 
 import cv2
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 
 class Recorder:
     def __init__(self, fps=30, before=10, after=10, output_dir="clips"):
@@ -16,6 +18,8 @@ class Recorder:
         self.before = before
         self.after = after
         self.output_dir = Path(output_dir)
+        if not self.output_dir.is_absolute():
+            self.output_dir = PROJECT_ROOT / self.output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.buffer = deque(maxlen=max(1, fps * before))
         self.recording = False

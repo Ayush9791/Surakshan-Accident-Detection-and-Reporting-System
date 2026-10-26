@@ -9,8 +9,9 @@ from torchvision import datasets, transforms
 
 from model import AccidentNet
 
-DATASET_DIR = Path("dataset")
-OUTPUT_PATH = Path("surakshan_model.pth")
+PROJECT_ROOT = Path(__file__).resolve().parent
+DATASET_DIR = PROJECT_ROOT / "dataset"
+OUTPUT_PATH = PROJECT_ROOT / "surakshan_model.pth"
 BATCH_SIZE = 32
 EPOCHS = 10
 LEARNING_RATE = 1e-3

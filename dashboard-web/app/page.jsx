@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, AlertTriangle, BellRing, Camera, CheckCircle2, ChevronRight, CircleUserRound, ClipboardList, Hospital, LogOut, MapPin, RefreshCw, ShieldCheck, Siren, UserPlus, Video, XCircle } from "lucide-react";
+import { Activity, AlertTriangle, BellRing, Camera, CheckCircle2, CircleUserRound, ClipboardList, Hospital, LogOut, MapPin, RefreshCw, ShieldCheck, Siren, UserPlus, Video, XCircle } from "lucide-react";
 
 const API = (process.env.NEXT_PUBLIC_SURAKSHAN_API_URL || "http://127.0.0.1:5000").replace(/\/$/, "");
 const STATUSES = ["New", "Under Review", "Verified", "Dismissed", "Resolved"];
@@ -50,7 +50,15 @@ export default function Dashboard() {
     if (!token || !user) return;
     try {
       const response = await authFetch("/incidents?limit=200", { cache: "no-store" });
-      if (response.status === 401) { window.localStorage.removeItem("surakshan_token"); setToken(""); setUser(null); return; }
+      if (response.status === 401) {
+        window.localStorage.removeItem("surakshan_token");
+        streamRef.current?.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+        setCameraOn(false);
+        setToken("");
+        setUser(null);
+        return;
+      }
       if (!response.ok) throw new Error("Could not load incidents");
       setIncidents((await response.json()).incidents || []);
       setApiOnline(true);
@@ -89,7 +97,12 @@ export default function Dashboard() {
 
   function logout() {
     window.localStorage.removeItem("surakshan_token");
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraOn(false);
     setToken(""); setUser(null); setIncidents([]); setDispatches([]); setUsers([]); setAudit([]);
+    setSelectedId(""); setAssignOrg(""); setNotice(""); setCameraError("");
   }
 
   async function signIn(event) {
@@ -107,12 +120,14 @@ export default function Dashboard() {
   async function createTestIncident() {
     setBusy(true);
     try {
-      const response = await fetch(`${API}/alert`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-        camera_id: "LOCAL-WEBCAM-01", location: "College demonstration site", event: "SIMULATED_POTENTIAL_ACCIDENT",
-        incident_id: `test-${crypto.randomUUID()}`, confidence: 0.93,
+      const incidentId = `test-${crypto.randomUUID()}`;
+      const response = await authFetch("/incidents/test", { method: "POST", body: JSON.stringify({
+        camera_id: "LOCAL-WEBCAM-01", location: "College demonstration site",
+        incident_id: incidentId, confidence: 0.93,
       }) });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || "Could not create incident");
+      setSelectedId(incidentId);
       setNotice("Test incident recorded. It is labelled as simulated; no emergency service was contacted.");
       await loadData();
     } catch (error) { setNotice(error.message); }
@@ -212,7 +227,7 @@ export default function Dashboard() {
       <label>Password<input required type="password" autoComplete="current-password" value={login.password} onChange={e => setLogin({ ...login, password: e.target.value })} /></label>
       {loginError && <div className="error-box">{loginError}</div>}
       <button className="button button-primary full-width" disabled={busy}>{busy ? "Signing in…" : "Sign in securely"}</button>
-      <div className="login-help"><strong>Local demo accounts</strong><br />Admin: admin / Admin@12345<br />Authority: authority / Authority@12345<br />Hospital: hospital / Hospital@12345<br /><small>Change demo passwords before any shared deployment.</small></div>
+      <div className="login-help"><strong>Local development</strong><br />Demo accounts are documented in the repository README. Change their passwords before sharing this application.<small>Dispatch is simulated; no emergency service is contacted.</small></div>
       <small className="login-foot">Demo environment · Dispatch is simulated</small>
     </form>
   </main>;
@@ -255,7 +270,7 @@ export default function Dashboard() {
             {selected ? <div className="detail-content"><div className="detail-location"><span className="location-icon"><MapPin size={17}/></span><div><strong>{selected.location || "Location not configured"}</strong><small>{selected.camera_id} · {new Date(selected.timestamp).toLocaleString()}</small></div></div>
               <div className="detail-stats"><div><span>Model confidence</span><strong>{typeof selected.confidence === "number" ? Math.round(selected.confidence*100)+"%" : "Not supplied"}</strong><div className="confidence-track"><span style={{width: typeof selected.confidence === "number" ? `${selected.confidence*100}%` : "0%"}}/></div></div><div><span>Incident status</span><strong><span className={`status-badge ${statusClass(selected.status)}`}>{selected.status}</span></strong></div></div>
               {user.role !== "hospital" && <div className="detail-actions"><button className="button button-primary" disabled={busy || selected.status === "Verified"} onClick={() => statusAction("Verified")}><CheckCircle2 size={15}/> Verify</button><button className="button button-secondary" disabled={busy} onClick={() => statusAction("Under Review")}>Review</button><button className="button button-quiet" disabled={busy} onClick={() => statusAction("Dismissed")}>Dismiss</button><button className="button button-quiet" disabled={busy} onClick={() => statusAction("Resolved")}>Resolve</button></div>}
-              {user.role !== "hospital" && <><label className="field-label">Hospital organisation<input value={assignOrg} onChange={e => setAssignOrg(e.target.value)} placeholder="Exact organisation name from accounts"/></label><div className="detail-actions"><button className="button button-secondary" disabled={busy} onClick={assignIncident}><Hospital size={15}/> Assign to hospital</button><button className="button button-quiet" disabled={busy} onClick={dispatchAction}><BellRing size={15}/> Simulate dispatch</button></div></>}
+              {user.role !== "hospital" && <><label className="field-label">Hospital organisation<input value={assignOrg} onChange={e => setAssignOrg(e.target.value)} placeholder="Exact organisation name from accounts"/></label><div className="detail-actions"><button className="button button-secondary" disabled={busy || selected.status !== "Verified"} onClick={assignIncident}><Hospital size={15}/> Assign to hospital</button><button className="button button-quiet" disabled={busy || selected.status !== "Verified"} onClick={dispatchAction}><BellRing size={15}/> Simulate dispatch</button></div></>}
               {user.role === "hospital" && <div className="inline-note">This view is restricted to verified/resolved incidents available to your organisation. Dispatch actions are controlled by the authority.</div>}
               <div className="detail-footnote"><ShieldCheck size={14}/> AI detection is a potential incident, not a verified emergency.</div>
             </div> : <div className="empty-state"><AlertTriangle size={24}/><strong>Select an incident</strong><span>Incident detail and permitted actions will appear here.</span></div>}
