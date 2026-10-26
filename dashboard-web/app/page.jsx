@@ -9,7 +9,7 @@ const STATUSES = ["New", "Under Review", "Verified", "Dismissed", "Resolved"];
 export default function Dashboard() {
   const [token, setToken] = useState("");
   const [user, setUser] = useState(null);
-  const [login, setLogin] = useState({ username: "admin", password: "Admin@12345" });
+  const [login, setLogin] = useState({ username: "", password: "" });
   const [loginError, setLoginError] = useState("");
   const [incidents, setIncidents] = useState([]);
   const [dispatches, setDispatches] = useState([]);
@@ -235,7 +235,7 @@ export default function Dashboard() {
     <section className="main-area" id="overview">
       <header className="topbar"><div className="breadcrumb"><span>Operations</span><span>/</span><strong>{user.role === "hospital" ? "Hospital desk" : user.role === "authority" ? "Authority control room" : "Administration"}</strong></div><div className="topbar-right"><span className="system-state"><span className={apiOnline ? "live-dot" : "offline-dot"}/>{apiOnline ? "API ONLINE" : "API OFFLINE"}</span><span className="avatar">{user.username.slice(0,2).toUpperCase()}</span></div></header>
       <div className="page-content">
-        <div className="page-heading"><div><div className="eyebrow">{user.organization.toUpperCase()}</div><h1>{user.role === "hospital" ? "Hospital incident desk" : user.role === "authority" ? "Authority operations" : "Operations overview"}</h1><p>{user.role === "hospital" ? "Review incidents verified by the control room and assigned to your organisation." : "Monitor potential accidents, review incident status and coordinate simulated responses."}</p></div><div className="heading-actions"><span className="updated-label"><span className={apiOnline ? "live-dot" : "offline-dot"}/> {apiOnline ? "Connected" : "Disconnected"}</span>{user.role !== "hospital" && <button className="button button-primary" onClick={createTestIncident} disabled={busy}><AlertTriangle size={15}/> Create test incident</button>}</div></div>
+        <div className="page-heading"><div><div className="eyebrow">{(user.organization || "OPERATIONS").toUpperCase()}</div><h1>{user.role === "hospital" ? "Hospital incident desk" : user.role === "authority" ? "Authority operations" : "Operations overview"}</h1><p>{user.role === "hospital" ? "Review incidents verified by the control room and assigned to your organisation." : "Monitor potential accidents, review incident status and coordinate simulated responses."}</p></div><div className="heading-actions"><span className="updated-label"><span className={apiOnline ? "live-dot" : "offline-dot"}/> {apiOnline ? "Connected" : "Disconnected"}</span>{user.role !== "hospital" && <button className="button button-primary" onClick={createTestIncident} disabled={busy}><AlertTriangle size={15}/> Create test incident</button>}</div></div>
         {notice && <div className="notice" role="status"><span>{notice}</span><button onClick={() => setNotice("")} aria-label="Dismiss"><XCircle size={16}/></button></div>}
         <div className="metrics-grid">
           <Metric label="Incidents visible" value={incidents.length} icon={<ClipboardList size={18}/>} tone="muted"/>
