@@ -80,8 +80,14 @@ To use different seeded passwords on a fresh database, set `SURAKSHAN_ADMIN_PASS
 4. Click **Simulate dispatch** and verify the notification appears in the dispatch log.
 5. Sign out and sign in as `hospital`. The verified incident should appear in the hospital queue.
 6. Use **Account management** to create additional authority/hospital users.
-7. Use **Start AI detector** to launch the existing Python webcam inference process on the computer running the API. It opens an OpenCV window and writes logs to `logs/detector.log`. Make sure the webcam is not in use by another application. Stop the browser preview before starting the Python detector.
-8. When a positive event passes the existing incident gate, the detector submits an incident to the API. Review it in the dashboard. Model output remains a potential incident until a human verifies it.
+7. Use **Start AI detector** to launch the Python inference process on the computer running the API. It opens an OpenCV window and writes logs to `logs/detector.log`. Stop the browser preview before starting the Python detector.
+8. By default, the detector uses the local webcam (`SURAKSHAN_CAMERA_URL=0`). To use Android IP Webcam, start its server on the phone, open the displayed IP address from the laptop, then set the stream URL in the same PowerShell session **before starting the API**:
+   ```powershell
+   $env:SURAKSHAN_CAMERA_URL = "http://192.168.1.105:8080/video"
+   uvicorn live_system.server:app --host 127.0.0.1 --port 5000
+   ```
+   Replace `192.168.1.105` with the phone's actual IP. Use `http`, not `https`, and include `/video`. Keep both devices on a network that permits device-to-device traffic. The API's detector subprocess inherits this setting. If the stream opens but has no frames, check `logs/detector.log`.
+9. When a positive event passes the existing incident gate, the detector submits an incident to the API. Review it in the dashboard. Model output remains a potential incident until a human verifies it.
 
 ## Roles and permissions
 
