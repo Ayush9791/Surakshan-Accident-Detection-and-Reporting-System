@@ -274,7 +274,7 @@ def list_incidents(limit: int = Query(default=100, ge=1, le=200), user: dict = D
     try:
         if user["role"] == "hospital":
             rows = db.execute("""SELECT incident_id,timestamp,camera_id,location,event,confidence,status,assigned_to
-                FROM incidents WHERE status IN ('Verified','Resolved') AND (assigned_to='' OR assigned_to=?)
+                FROM incidents WHERE status IN ('Verified','Resolved') AND assigned_to=?
                 ORDER BY timestamp DESC LIMIT ?""", (user["organization"], limit)).fetchall()
         else:
             rows = db.execute("""SELECT incident_id,timestamp,camera_id,location,event,confidence,status,assigned_to
