@@ -107,7 +107,7 @@ export default function Dashboard() {
   async function createTestIncident() {
     setBusy(true);
     try {
-      const response = await fetch(`${API}/alert`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+      const response = await authFetch("/incidents/test", { method: "POST", body: JSON.stringify({
         camera_id: "LOCAL-WEBCAM-01", location: "College demonstration site", event: "SIMULATED_POTENTIAL_ACCIDENT",
         incident_id: `test-${crypto.randomUUID()}`, confidence: 0.93,
       }) });
