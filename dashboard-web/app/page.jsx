@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, AlertTriangle, BellRing, Camera, CheckCircle2, ChevronRight, CircleUserRound, ClipboardList, Hospital, LogOut, MapPin, RefreshCw, ShieldCheck, Siren, UserPlus, Video, XCircle } from "lucide-react";
+import { Activity, AlertTriangle, BellRing, Camera, CheckCircle2, CircleUserRound, ClipboardList, Hospital, LogOut, MapPin, RefreshCw, ShieldCheck, Siren, UserPlus, Video, XCircle } from "lucide-react";
 
 const API = (process.env.NEXT_PUBLIC_SURAKSHAN_API_URL || "http://127.0.0.1:5000").replace(/\/$/, "");
 const STATUSES = ["New", "Under Review", "Verified", "Dismissed", "Resolved"];
