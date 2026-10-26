@@ -22,12 +22,15 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("SURAKSHAN_DB_PATH", "data/surakshan.db"))
+if not DB_PATH.is_absolute():
+    DB_PATH = PROJECT_ROOT / DB_PATH
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 AUTH_SECRET = os.environ.get("SURAKSHAN_AUTH_SECRET", "local-academic-demo-secret-change-before-deployment")
 TOKEN_HOURS = 8
 DETECTOR_PROCESS = None
-DETECTOR_LOG = Path("logs/detector.log")
+DETECTOR_LOG = PROJECT_ROOT / "logs" / "detector.log"
 DETECTOR_LOG.parent.mkdir(parents=True, exist_ok=True)
 DETECTOR_LOG_HANDLE = None
 STATUSES = {"New", "Under Review", "Verified", "Dismissed", "Resolved"}
@@ -35,7 +38,7 @@ app = FastAPI(title="Surakshan Incident API", version="2.0.0")
 origins = [x.strip() for x in os.environ.get("SURAKSHAN_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if x.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=False,
                    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
-                   allow_headers=["Content-Type", "Authorization"])
+                   allow_headers=["Content-Type", "Authorization", "X-Detector-Token"])
 
 
 class AlertPayload(BaseModel):
@@ -275,6 +278,31 @@ def receive_alert(payload: AlertPayload, x_detector_token: Optional[str] = Heade
     return {"accepted": True, "incident_id": incident_id}
 
 
+@app.post("/incidents/test", status_code=201)
+def create_test_incident(payload: AlertPayload,
+                         user: dict = Depends(require_roles("admin", "authority"))):
+    """Create a clearly marked demo incident without bypassing user authentication."""
+    incident_id = payload.incident_id or f"test-{uuid.uuid4()}"
+    timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    db = connect()
+    try:
+        db.execute(
+            """INSERT INTO incidents
+               (incident_id,timestamp,camera_id,location,event,confidence,status)
+               VALUES (?,?,?,?,?,?,'New')""",
+            (incident_id, timestamp, payload.camera_id, payload.location,
+             "SIMULATED_POTENTIAL_ACCIDENT", payload.confidence),
+        )
+        audit(db, user["username"], "test_incident_created",
+              f"{incident_id} | {payload.camera_id} | simulated")
+        db.commit()
+        return {"accepted": True, "simulated": True, "incident_id": incident_id}
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="Incident ID already exists") from exc
+    finally:
+        db.close()
+
+
 @app.get("/incidents")
 def list_incidents(limit: int = Query(default=100, ge=1, le=200), user: dict = Depends(current_user)):
     db = connect()
@@ -312,6 +340,11 @@ def assign_incident(incident_id: str, organization: str = Query(min_length=1, ma
                     user: dict = Depends(require_roles("admin", "authority"))):
     db = connect()
     try:
+        incident = db.execute("SELECT status FROM incidents WHERE incident_id=?", (incident_id,)).fetchone()
+        if incident is None:
+            raise HTTPException(status_code=404, detail="Incident not found")
+        if incident["status"] != "Verified":
+            raise HTTPException(status_code=409, detail="Only verified incidents can be assigned to a hospital")
         target = db.execute("SELECT username FROM users WHERE organization=? AND role='hospital' AND active=1 LIMIT 1", (organization,)).fetchone()
         if not target:
             raise HTTPException(status_code=404, detail="No active hospital account found for that organization")
@@ -329,9 +362,11 @@ def assign_incident(incident_id: str, organization: str = Query(min_length=1, ma
 def simulate_dispatch(payload: SimulatedDispatchPayload, user: dict = Depends(require_roles("admin", "authority"))):
     db = connect()
     try:
-        incident = db.execute("SELECT incident_id FROM incidents WHERE incident_id=?", (payload.incident_id,)).fetchone()
+        incident = db.execute("SELECT incident_id,status FROM incidents WHERE incident_id=?", (payload.incident_id,)).fetchone()
         if incident is None:
             raise HTTPException(status_code=404, detail="Incident not found")
+        if incident["status"] != "Verified":
+            raise HTTPException(status_code=409, detail="Only verified incidents can be dispatched, even in simulation")
         notification_id = str(uuid.uuid4())
         timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
         db.execute("""INSERT INTO simulated_dispatches
