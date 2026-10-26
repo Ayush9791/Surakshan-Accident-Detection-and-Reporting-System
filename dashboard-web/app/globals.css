@@ -21,3 +21,5 @@
 .metric-role{font-size:20px;overflow-wrap:anywhere}.field-label{margin:15px 0 10px}.field-label input{margin-top:0}
 @media(max-width:900px){.admin-grid{grid-template-columns:1fr}.admin-form,.password-form{grid-template-columns:1fr 1fr}}
 @media(max-width:600px){.login-card{padding:23px}.admin-form,.password-form{grid-template-columns:1fr}.login-shell{padding:14px}}
+
+.camera-control-buttons{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.camera-control-buttons .button{font-size:10px;padding:8px 10px}@media(max-width:600px){.camera-control-buttons{width:100%;justify-content:stretch}.camera-control-buttons .button{flex:1;white-space:normal}}
