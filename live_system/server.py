@@ -11,6 +11,8 @@ import json
 import os
 import secrets
 import sqlite3
+import subprocess
+import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -24,6 +26,10 @@ DB_PATH = Path(os.environ.get("SURAKSHAN_DB_PATH", "data/surakshan.db"))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 AUTH_SECRET = os.environ.get("SURAKSHAN_AUTH_SECRET", "local-academic-demo-secret-change-before-deployment")
 TOKEN_HOURS = 8
+DETECTOR_PROCESS = None
+DETECTOR_LOG = Path("logs/detector.log")
+DETECTOR_LOG.parent.mkdir(parents=True, exist_ok=True)
+DETECTOR_LOG_HANDLE = None
 STATUSES = {"New", "Under Review", "Verified", "Dismissed", "Resolved"}
 app = FastAPI(title="Surakshan Incident API", version="2.0.0")
 origins = [x.strip() for x in os.environ.get("SURAKSHAN_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if x.strip()]
@@ -250,9 +256,10 @@ def list_users(admin: dict = Depends(require_roles("admin"))):
 
 
 @app.post("/alert", status_code=202)
-def receive_alert(payload: AlertPayload):
-    # Local detector ingestion endpoint; do not expose this API publicly without
-    # authenticating the detector or requiring a shared ingestion token.
+def receive_alert(payload: AlertPayload, x_detector_token: Optional[str] = Header(default=None)):
+    expected_detector_token = os.environ.get("SURAKSHAN_DETECTOR_TOKEN")
+    if expected_detector_token and not hmac.compare_digest(x_detector_token or "", expected_detector_token):
+        raise HTTPException(status_code=401, detail="Invalid detector token")
     incident_id = payload.incident_id or str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
     db = connect()
@@ -350,6 +357,59 @@ def list_simulated_dispatches(limit: int = Query(default=50, ge=1, le=200),
         return {"notifications": [dict(row) for row in rows]}
     finally:
         db.close()
+
+
+
+@app.get("/detector/status")
+def detector_status(user: dict = Depends(require_roles("admin", "authority"))):
+    running = DETECTOR_PROCESS is not None and DETECTOR_PROCESS.poll() is None
+    return {"running": running, "mode": "server-local-webcam", "note": "Inference uses the webcam attached to the API host."}
+
+
+@app.post("/detector/start")
+def detector_start(user: dict = Depends(require_roles("admin", "authority"))):
+    global DETECTOR_PROCESS, DETECTOR_LOG_HANDLE
+    if DETECTOR_PROCESS is not None and DETECTOR_PROCESS.poll() is None:
+        return {"running": True, "message": "Detector is already running"}
+    try:
+        DETECTOR_LOG_HANDLE = open(DETECTOR_LOG, "a", encoding="utf-8")
+        DETECTOR_PROCESS = subprocess.Popen(
+            [sys.executable, "-m", "live_system.advanced_live"],
+            stdin=subprocess.DEVNULL, stdout=DETECTOR_LOG_HANDLE,
+            stderr=subprocess.STDOUT, cwd=str(Path(__file__).resolve().parent.parent),
+        )
+        db = connect()
+        try:
+            audit(db, user["username"], "detector_started", "Local host webcam inference")
+            db.commit()
+        finally:
+            db.close()
+        return {"running": True, "pid": DETECTOR_PROCESS.pid, "message": "Detector started on the API host"}
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not start detector: {exc}") from exc
+
+
+@app.post("/detector/stop")
+def detector_stop(user: dict = Depends(require_roles("admin", "authority"))):
+    global DETECTOR_PROCESS, DETECTOR_LOG_HANDLE
+    if DETECTOR_PROCESS is None or DETECTOR_PROCESS.poll() is not None:
+        return {"running": False, "message": "Detector is not running"}
+    DETECTOR_PROCESS.terminate()
+    try:
+        DETECTOR_PROCESS.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        DETECTOR_PROCESS.kill()
+        DETECTOR_PROCESS.wait(timeout=3)
+    if DETECTOR_LOG_HANDLE:
+        DETECTOR_LOG_HANDLE.close()
+        DETECTOR_LOG_HANDLE = None
+    db = connect()
+    try:
+        audit(db, user["username"], "detector_stopped", "Local host webcam inference")
+        db.commit()
+    finally:
+        db.close()
+    return {"running": False, "message": "Detector stopped"}
 
 
 @app.get("/admin/audit")
