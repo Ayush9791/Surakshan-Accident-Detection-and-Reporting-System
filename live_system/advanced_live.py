@@ -41,7 +41,14 @@ def main():
     try:
         for cam_id, source in CAMERA_SOURCES.items():
             print(f"[CAMERA] Opening {cam_id}: {source}", flush=True)
-            streams[cam_id] = CameraStream(source)
+            stream = CameraStream(source)
+            streams[cam_id] = stream
+            if not stream.wait_until_ready(timeout=8.0):
+                raise RuntimeError(
+                    f"Camera source {source!r} opened but no video frames arrived. "
+                    "For IP Webcam, use http://PHONE_IP:8080/video, keep the app's "
+                    "server running, and confirm the URL works from this computer."
+                )
             recorders[cam_id] = Recorder()
             gates[cam_id] = IncidentGate()
 
