@@ -25,6 +25,7 @@ export default function Dashboard() {
   const [newUser, setNewUser] = useState({ username: "", password: "", role: "hospital", organization: "" });
   const [assignOrg, setAssignOrg] = useState("");
   const [apiOnline, setApiOnline] = useState(false);
+  const [detectorRunning, setDetectorRunning] = useState(false);
   const [changePassword, setChangePassword] = useState({ current_password: "", new_password: "" });
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -53,6 +54,10 @@ export default function Dashboard() {
       if (!response.ok) throw new Error("Could not load incidents");
       setIncidents((await response.json()).incidents || []);
       setApiOnline(true);
+      if (user.role !== "hospital") {
+        const detectorResponse = await authFetch("/detector/status", { cache: "no-store" });
+        if (detectorResponse.ok) setDetectorRunning((await detectorResponse.json()).running);
+      }
       if (user.role !== "hospital") {
         const dispatchResponse = await authFetch("/dispatch/notifications?limit=50", { cache: "no-store" });
         if (dispatchResponse.ok) setDispatches((await dispatchResponse.json()).notifications || []);
@@ -173,6 +178,19 @@ export default function Dashboard() {
     finally { setBusy(false); }
   }
 
+
+  async function detectorAction(action) {
+    setBusy(true);
+    try {
+      const response = await authFetch(`/detector/${action}`, { method: "POST" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || "Detector action failed");
+      setDetectorRunning(Boolean(payload.running));
+      setNotice(payload.message || (payload.running ? "Detector started." : "Detector stopped."));
+    } catch (error) { setNotice(error.message); }
+    finally { setBusy(false); }
+  }
+
   async function toggleCamera() {
     setCameraError("");
     if (cameraOn) { streamRef.current?.getTracks().forEach(track => track.stop()); streamRef.current = null; setCameraOn(false); return; }
@@ -246,7 +264,7 @@ export default function Dashboard() {
         <div className="lower-grid">
           <section className="panel camera-panel" id="camera"><div className="panel-heading"><div><h2>Local webcam preview</h2><p>Browser preview only; model inference remains in the Python process</p></div><span className="stream-pill"><span className={cameraOn ? "live-dot" : "offline-dot"}/>{cameraOn ? "PREVIEW LIVE" : "STOPPED"}</span></div>
             <div className="camera-preview"><video ref={videoRef} autoPlay playsInline muted className={cameraOn ? "webcam-video visible" : "webcam-video"}/>{!cameraOn && <div className="camera-placeholder"><Camera size={28}/><strong>Camera preview stopped</strong><span>Allow browser camera access to start.</span></div>}</div>
-            {cameraError && <p className="error-text">{cameraError}</p>}<div className="camera-controls"><div><span className={cameraOn ? "live-dot" : "offline-dot"}/>{cameraOn ? "Camera active in browser" : "No active preview"}</div><button className={cameraOn ? "button button-secondary" : "button button-primary"} onClick={toggleCamera}>{cameraOn ? "Stop preview" : "Start webcam preview"}</button></div><p className="camera-disclaimer">This preview does not upload video or run AI. Use the Python advanced camera pipeline for local inference.</p>
+            {cameraError && <p className="error-text">{cameraError}</p>}<div className="camera-controls"><div><span className={detectorRunning ? "live-dot" : "offline-dot"}/>{detectorRunning ? "Python detector running on API host" : "Python detector stopped"}</div><div className="camera-control-buttons"><button className={cameraOn ? "button button-secondary" : "button button-quiet"} onClick={toggleCamera}>{cameraOn ? "Stop browser preview" : "Preview webcam"}</button>{user.role !== "hospital" && <button className={detectorRunning ? "button button-secondary" : "button button-primary"} disabled={busy || cameraOn} onClick={() => detectorAction(detectorRunning ? "stop" : "start")}>{detectorRunning ? "Stop AI detector" : "Start AI detector"}</button>}</div></div>{cameraOn && detectorRunning && <p className="error-text">Stop one camera client before starting the other; both may compete for the same webcam.</p>}<p className="camera-disclaimer">The browser preview is not AI. Start AI detector to launch the existing Python inference process on the API host; it opens an OpenCV window on that machine and writes output to logs/detector.log. This works when the API runs on the computer connected to the webcam, not on a cloud host without a camera.</p>
           </section>
           {user.role !== "hospital" && <section className="panel dispatch-panel" id="dispatch"><div className="panel-heading"><div><h2>Simulated dispatch log</h2><p>No external notifications are sent</p></div><span className="panel-pill">{dispatches.length} EVENTS</span></div><div className="dispatch-list">{dispatches.length === 0 ? <div className="empty-state compact"><BellRing size={22}/><strong>No simulated dispatches</strong><span>Select an incident and use Simulate dispatch.</span></div> : dispatches.slice(0,8).map(item => <div className="dispatch-row" key={item.notification_id}><span className="dispatch-icon"><BellRing size={15}/></span><div><strong>{item.destination}</strong><small>{item.incident_id} · {new Date(item.timestamp).toLocaleString()}</small></div><span className="simulated-tag">SIMULATED</span></div>)}</div><div className="dispatch-note"><ShieldCheck size={15}/>Simulated records only; no authority has been contacted.</div></section>}
         </div>
