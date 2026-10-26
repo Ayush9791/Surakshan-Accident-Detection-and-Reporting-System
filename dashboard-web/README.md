@@ -38,7 +38,14 @@ These are local demo credentials. Change the passwords after signing in; do not 
 - Traffic authority: incident review/status updates, assignment, detector controls and simulated dispatch.
 - Hospital: only verified/resolved incidents assigned to its organisation.
 - Incident records, assignments, users and simulated dispatches persist in SQLite.
-- Browser webcam preview is only a preview. **Start AI detector** launches `python -m live_system.advanced_live` on the same host as the API, where it uses that machine's camera and opens an OpenCV window.
+- Browser webcam preview is only a preview. **Start AI detector** launches `python -m live_system.advanced_live` on the same host as the API.
+- The detector defaults to camera index `0`. For Android IP Webcam, start the phone's server and set `SURAKSHAN_CAMERA_URL` in the PowerShell session before starting the API, for example:
+  ```powershell
+  $env:SURAKSHAN_CAMERA_URL = "http://192.168.1.105:8080/video"
+  uvicorn live_system.server:app --host 127.0.0.1 --port 5000
+  ```
+  Replace the IP with the phone's actual address. Use HTTP and include `/video`; confirm the stream opens from the laptop. Detector logs are written to `logs/detector.log`.
+- Demo incident creation uses an authenticated operator endpoint. Hospital assignment and simulated dispatch are available only after an incident is verified.
 - Simulated dispatch only records a local notification. It never contacts real authorities.
 
 ## Configuration
@@ -52,9 +59,10 @@ These are local demo credentials. Change the passwords after signing in; do not 
 
 Keep the API bound to localhost for the college demo. A public/cloud deployment needs HTTPS, a firewall, secure secret configuration, and further security hardening.
 
-## Build
+## Checks
 
 ```powershell
 npm install
+npm run lint
 npm run build
 ```
