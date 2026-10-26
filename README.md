@@ -70,7 +70,7 @@ These accounts are created automatically the first time the database starts, unl
 
 Change each password after logging in. The admin can create additional hospital and authority accounts in **Account management**. Hospital access is limited to verified/resolved incidents assigned to that hospital organisation. To assign a case, use the exact organisation name shown in the admin account list (the seeded hospital is `Demo General Hospital`).
 
-To use different seeded passwords on a fresh database, set `SURAKSHAN_ADMIN_PASSWORD`, `SURAKSHAN_AUTHORITY_PASSWORD`, and `SURAKSHAN_HOSPITAL_PASSWORD` before first starting the API. Existing accounts are not reset when these variables change. Set `SURAKSHAN_AUTH_SECRET` to a long random value before sharing the app. The example defaults are for local demonstration only.
+To use different seeded passwords on a fresh database, set `SURAKSHAN_ADMIN_PASSWORD`, `SURAKSHAN_AUTHORITY_PASSWORD`, and `SURAKSHAN_HOSPITAL_PASSWORD` before first starting the API. Existing accounts are not reset when these variables change. Set `SURAKSHAN_AUTH_SECRET` to a long random value before sharing the app. Without it, the API generates a temporary random secret at startup, so existing sessions will need to sign in again after an API restart.
 
 ### Test the end-to-end workflow
 
