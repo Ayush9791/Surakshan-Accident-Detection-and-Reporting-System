@@ -10,7 +10,7 @@ from live_system.predict import predict_frame_details
 from live_system.recorder import Recorder
 
 CAMERA_SOURCES = {
-    "Camera 1": 0,
+    "Camera 1": "https://192.168.1.26:8080",
     # "Camera 2": "sample_video.mp4",
     # "Camera 3": "rtsp://user:password@camera-address/stream",
 }
