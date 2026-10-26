@@ -455,6 +455,24 @@ def detector_stop(user: dict = Depends(require_roles("admin", "authority"))):
     return {"running": False, "message": "Detector stopped"}
 
 
+
+@app.on_event("shutdown")
+def stop_detector_on_api_shutdown():
+    """Avoid leaving the camera/inference subprocess running after API shutdown."""
+    global DETECTOR_PROCESS, DETECTOR_LOG_HANDLE
+    if DETECTOR_PROCESS is not None and DETECTOR_PROCESS.poll() is None:
+        DETECTOR_PROCESS.terminate()
+        try:
+            DETECTOR_PROCESS.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            DETECTOR_PROCESS.kill()
+            DETECTOR_PROCESS.wait(timeout=3)
+    DETECTOR_PROCESS = None
+    if DETECTOR_LOG_HANDLE and not DETECTOR_LOG_HANDLE.closed:
+        DETECTOR_LOG_HANDLE.close()
+    DETECTOR_LOG_HANDLE = None
+
+
 @app.get("/admin/audit")
 def list_audit(limit: int = Query(default=100, ge=1, le=500), admin: dict = Depends(require_roles("admin"))):
     db = connect()
