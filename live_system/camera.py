@@ -5,6 +5,14 @@ import time
 import cv2
 
 
+def normalize_camera_source(value):
+    """Convert numeric camera IDs to integers; preserve file and stream URLs."""
+    value = str(value).strip()
+    if not value:
+        raise ValueError("Camera source cannot be empty")
+    return int(value) if value.isdecimal() else value
+
+
 class CameraStream:
     def __init__(self, source=0):
         self.source = source
