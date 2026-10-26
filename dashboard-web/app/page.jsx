@@ -214,7 +214,7 @@ export default function Dashboard() {
       <label>Password<input required type="password" autoComplete="current-password" value={login.password} onChange={e => setLogin({ ...login, password: e.target.value })} /></label>
       {loginError && <div className="error-box">{loginError}</div>}
       <button className="button button-primary full-width" disabled={busy}>{busy ? "Signing in…" : "Sign in securely"}</button>
-      <div className="login-help"><strong>Local demo accounts</strong><br />Admin: admin / Admin@12345<br />Authority: authority / Authority@12345<br />Hospital: hospital / Hospital@12345<br /><small>Change demo passwords before any shared deployment.</small></div>
+      <div className="login-help"><strong>Local development</strong><br />Demo accounts are documented in the repository README. Change their passwords before sharing this application.<small>Dispatch is simulated; no emergency service is contacted.</small></div>
       <small className="login-foot">Demo environment · Dispatch is simulated</small>
     </form>
   </main>;
