@@ -43,7 +43,7 @@ These are local demo credentials. Change the passwords after signing in; do not 
 
 ## Configuration
 
-The API reads `.env.backend.example` as documentation; copy its values into your shell environment if you need custom secrets. Important variables:
+`.env.backend.example` documents optional variables; the API does not automatically load this file. Set values in your PowerShell session before starting Uvicorn if you need custom secrets. Important variables:
 
 - `SURAKSHAN_AUTH_SECRET`: session-signing secret.
 - `SURAKSHAN_ADMIN_PASSWORD`, `SURAKSHAN_AUTHORITY_PASSWORD`, `SURAKSHAN_HOSPITAL_PASSWORD`: seeded passwords on first database creation.
