@@ -1,16 +1,19 @@
 # Surakshan Web Dashboard
 
-Next.js/React replacement for the former Streamlit dashboard. This first phase provides an operator-oriented incident queue, incident detail view, status actions, local browser webcam preview, and explicitly simulated dispatch notifications.
+Next.js/React role-based incident operations dashboard.
 
-## Requirements
+## Free local setup (Windows PowerShell)
 
-- Node.js 20 LTS recommended
-- The Surakshan FastAPI service running locally or at a trusted server
-- Browser camera access is available on localhost or HTTPS
+Requirements: Node.js 20 LTS, Python environment and dependencies installed from the repository root.
 
-## Run locally (Windows PowerShell)
+Terminal 1, from repository root:
 
-From the repository root:
+```powershell
+.\.venv\Scripts\Activate.ps1
+uvicorn live_system.server:app --host 127.0.0.1 --port 5000
+```
+
+Terminal 2:
 
 ```powershell
 cd dashboard-web
@@ -19,29 +22,39 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000. The default API URL is http://127.0.0.1:5000.
+Open http://localhost:3000.
 
-In a separate terminal from the repository root, start the backend:
+## Demo accounts
+
+- Admin: `admin` / `Admin@12345`
+- Traffic authority: `authority` / `Authority@12345`
+- Hospital: `hospital` / `Hospital@12345`
+
+These are local demo credentials. Change the passwords after signing in; do not use these defaults on a public server. Admins can create additional authority/hospital accounts.
+
+## Workflows
+
+- Admin: all incidents, account creation, audit trail, detector controls, status updates, hospital assignment and simulated dispatch.
+- Traffic authority: incident review/status updates, assignment, detector controls and simulated dispatch.
+- Hospital: only verified/resolved incidents assigned to its organisation.
+- Incident records, assignments, users and simulated dispatches persist in SQLite.
+- Browser webcam preview is only a preview. **Start AI detector** launches `python -m live_system.advanced_live` on the same host as the API, where it uses that machine's camera and opens an OpenCV window.
+- Simulated dispatch only records a local notification. It never contacts real authorities.
+
+## Configuration
+
+The API reads `.env.backend.example` as documentation; copy its values into your shell environment if you need custom secrets. Important variables:
+
+- `SURAKSHAN_AUTH_SECRET`: session-signing secret.
+- `SURAKSHAN_ADMIN_PASSWORD`, `SURAKSHAN_AUTHORITY_PASSWORD`, `SURAKSHAN_HOSPITAL_PASSWORD`: seeded passwords on first database creation.
+- `SURAKSHAN_DETECTOR_TOKEN`: optional shared secret required by `POST /alert` when configured; set the same value for the detector process.
+- `SURAKSHAN_CORS_ORIGINS`: allowed dashboard origins.
+
+Keep the API bound to localhost for the college demo. A public/cloud deployment needs HTTPS, a firewall, secure secret configuration, and further security hardening.
+
+## Build
 
 ```powershell
-..venv\Scripts\Activate.ps1
-uvicorn live_system.server:app --host 127.0.0.1 --port 5000
+npm install
+npm run build
 ```
-
-The dashboard polls the API every five seconds. Use **Create test incident** to create a persisted test record, then select it to verify/dismiss it or record a simulated dispatch notification.
-
-## What is and is not connected
-
-- Incident queue, status changes, and simulated notification log use the FastAPI backend and SQLite.
-- The webcam button uses browser `getUserMedia` for local preview only. It does **not** transmit frames to the server and does not run AI inference.
-- The existing Python `live_system.advanced_live` process remains the webcam-to-model inference path for now.
-- The illustrated evidence panel is a UI placeholder, not recorded incident footage.
-- Simulated dispatch is stored locally; it does not contact emergency services.
-
-## Deployment note
-
-A cloud-hosted backend cannot open a webcam physically attached to an operator's PC. For a real deployment, run an authorised camera/edge ingestion worker near the camera or stream video securely to a GPU inference service. Use HTTPS, authentication, access controls, secrets management, and retention policies before exposing the dashboard beyond localhost. Do not expose the current unauthenticated API to the public internet.
-
-## Next AI phase
-
-Use the existing CNN only as a baseline. Benchmark the CCTV-focused ACCIDENT dataset (https://accidentbench.github.io/) and evaluate grouped-by-video / unseen-camera performance. A practical system should combine vehicle detection and tracking with temporal accident recognition; a detector alone is not an accident classifier. See the repository's architecture plan for rollout details.
