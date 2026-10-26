@@ -110,8 +110,32 @@ class IncidentApiTests(unittest.TestCase):
         self.assertEqual(len(visible), 1)
         self.assertEqual(visible[0]["incident_id"], incident_id)
 
+
+    def test_test_incident_requires_authorized_operator(self):
+        payload = {"camera_id": "LOCAL-WEBCAM-01", "location": "Demo site",
+                   "incident_id": "test-auth-001", "confidence": 0.93}
+        self.assertEqual(self.client.post("/incidents/test", json=payload).status_code, 401)
+        forbidden = self.client.post("/incidents/test", headers=self.hospital_headers, json=payload)
+        self.assertEqual(forbidden.status_code, 403)
+        created = self.client.post("/incidents/test", headers=self.headers, json=payload)
+        self.assertEqual(created.status_code, 201, created.text)
+        incident = self.client.get("/incidents", headers=self.headers).json()["incidents"][0]
+        self.assertEqual(incident["event"], "SIMULATED_POTENTIAL_ACCIDENT")
+
+    def test_assignment_and_dispatch_require_verified_incident(self):
+        incident_id = self.create_incident("not-verified")
+        assignment = self.client.post(
+            f"/incidents/{incident_id}/assign?organization=Demo+General+Hospital",
+            headers=self.authority_headers,
+        )
+        self.assertEqual(assignment.status_code, 409)
+        dispatch = self.client.post("/dispatch/simulate", headers=self.authority_headers, json={
+            "incident_id": incident_id, "destination": "DEMO-CONTROL-ROOM", "channel": "dashboard-demo",
+        })
+        self.assertEqual(dispatch.status_code, 409)
+
     def test_simulated_dispatch_is_persisted_and_role_protected(self):
-        incident_id = self.create_incident()
+        incident_id = self.create_incident(status="Verified")
         payload = {"incident_id": incident_id, "destination": "DEMO-CONTROL-ROOM", "channel": "dashboard-demo"}
         response = self.client.post("/dispatch/simulate", headers=self.authority_headers, json=payload)
         self.assertEqual(response.status_code, 201, response.text)
