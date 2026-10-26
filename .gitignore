@@ -25,3 +25,7 @@ clips/*.avi
 .idea/
 .DS_Store
 Thumbs.db
+
+# OS/editor temporary files
+*.swp
+*.tmp
