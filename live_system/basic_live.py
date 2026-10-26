@@ -1,12 +1,16 @@
 """Basic single-camera live detection."""
+import os
+
 import cv2
+from live_system.camera import normalize_camera_source
 from live_system.predict import predict_frame_details
 
 
 def main():
-    cap = cv2.VideoCapture(0)
+    source = normalize_camera_source(os.environ.get("SURAKSHAN_CAMERA_URL", "0"))
+    cap = cv2.VideoCapture(source)
     if not cap.isOpened():
-        raise RuntimeError("Could not open camera 0")
+        raise RuntimeError(f"Could not open camera source {source!r}. For IP Webcam, use http://PHONE_IP:8080/video.")
 
     print("Starting Surakshan live detection. Press ESC to exit.")
     try:
