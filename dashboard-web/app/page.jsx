@@ -107,12 +107,14 @@ export default function Dashboard() {
   async function createTestIncident() {
     setBusy(true);
     try {
+      const incidentId = `test-${crypto.randomUUID()}`;
       const response = await authFetch("/incidents/test", { method: "POST", body: JSON.stringify({
-        camera_id: "LOCAL-WEBCAM-01", location: "College demonstration site", event: "SIMULATED_POTENTIAL_ACCIDENT",
-        incident_id: `test-${crypto.randomUUID()}`, confidence: 0.93,
+        camera_id: "LOCAL-WEBCAM-01", location: "College demonstration site",
+        incident_id: incidentId, confidence: 0.93,
       }) });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || "Could not create incident");
+      setSelectedId(incidentId);
       setNotice("Test incident recorded. It is labelled as simulated; no emergency service was contacted.");
       await loadData();
     } catch (error) { setNotice(error.message); }
@@ -255,7 +257,7 @@ export default function Dashboard() {
             {selected ? <div className="detail-content"><div className="detail-location"><span className="location-icon"><MapPin size={17}/></span><div><strong>{selected.location || "Location not configured"}</strong><small>{selected.camera_id} · {new Date(selected.timestamp).toLocaleString()}</small></div></div>
               <div className="detail-stats"><div><span>Model confidence</span><strong>{typeof selected.confidence === "number" ? Math.round(selected.confidence*100)+"%" : "Not supplied"}</strong><div className="confidence-track"><span style={{width: typeof selected.confidence === "number" ? `${selected.confidence*100}%` : "0%"}}/></div></div><div><span>Incident status</span><strong><span className={`status-badge ${statusClass(selected.status)}`}>{selected.status}</span></strong></div></div>
               {user.role !== "hospital" && <div className="detail-actions"><button className="button button-primary" disabled={busy || selected.status === "Verified"} onClick={() => statusAction("Verified")}><CheckCircle2 size={15}/> Verify</button><button className="button button-secondary" disabled={busy} onClick={() => statusAction("Under Review")}>Review</button><button className="button button-quiet" disabled={busy} onClick={() => statusAction("Dismissed")}>Dismiss</button><button className="button button-quiet" disabled={busy} onClick={() => statusAction("Resolved")}>Resolve</button></div>}
-              {user.role !== "hospital" && <><label className="field-label">Hospital organisation<input value={assignOrg} onChange={e => setAssignOrg(e.target.value)} placeholder="Exact organisation name from accounts"/></label><div className="detail-actions"><button className="button button-secondary" disabled={busy} onClick={assignIncident}><Hospital size={15}/> Assign to hospital</button><button className="button button-quiet" disabled={busy} onClick={dispatchAction}><BellRing size={15}/> Simulate dispatch</button></div></>}
+              {user.role !== "hospital" && <><label className="field-label">Hospital organisation<input value={assignOrg} onChange={e => setAssignOrg(e.target.value)} placeholder="Exact organisation name from accounts"/></label><div className="detail-actions"><button className="button button-secondary" disabled={busy || selected.status !== "Verified"} onClick={assignIncident}><Hospital size={15}/> Assign to hospital</button><button className="button button-quiet" disabled={busy || selected.status !== "Verified"} onClick={dispatchAction}><BellRing size={15}/> Simulate dispatch</button></div></>}
               {user.role === "hospital" && <div className="inline-note">This view is restricted to verified/resolved incidents available to your organisation. Dispatch actions are controlled by the authority.</div>}
               <div className="detail-footnote"><ShieldCheck size={14}/> AI detection is a potential incident, not a verified emergency.</div>
             </div> : <div className="empty-state"><AlertTriangle size={24}/><strong>Select an incident</strong><span>Incident detail and permitted actions will appear here.</span></div>}
