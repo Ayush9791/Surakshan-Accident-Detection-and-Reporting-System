@@ -1,4 +1,5 @@
 """HTTP alert client with optional shared detector token."""
+import base64
 import os
 import requests
 
@@ -6,7 +7,7 @@ API_URL = os.environ.get("SURAKSHAN_ALERT_URL", "http://127.0.0.1:5000/alert")
 DETECTOR_TOKEN = os.environ.get("SURAKSHAN_DETECTOR_TOKEN", "")
 
 
-def send_alert(camera_id, location="Unknown", incident_id=None, confidence=None):
+def send_alert(camera_id, location="Unknown", incident_id=None, confidence=None, image_path=None):
     payload = {
         "camera_id": camera_id,
         "location": location,
@@ -14,6 +15,12 @@ def send_alert(camera_id, location="Unknown", incident_id=None, confidence=None)
         "incident_id": incident_id,
         "confidence": confidence,
     }
+    if image_path:
+        try:
+            with open(image_path, "rb") as evidence_file:
+                payload["evidence_image"] = base64.b64encode(evidence_file.read()).decode("ascii")
+        except OSError as exc:
+            print(f"[API] Could not read incident evidence photo: {exc}", flush=True)
     headers = {"X-Detector-Token": DETECTOR_TOKEN} if DETECTOR_TOKEN else {}
     try:
         response = requests.post(API_URL, json=payload, headers=headers, timeout=(2, 3))
