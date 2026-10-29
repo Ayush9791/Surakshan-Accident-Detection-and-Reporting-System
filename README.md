@@ -134,3 +134,24 @@ Optional free-tier hosting can be explored later, but providers change limits, m
 - The dashboard evidence panel does not yet play saved incident clips.
 - Simulated dispatch does not contact real authorities.
 - This prototype has no production-grade HTTPS deployment, multi-factor authentication, formal password reset, or agency integration.
+
+
+## Incident evidence photos and manual review
+
+When the temporal gate opens a potential accident, the detector saves the annotated trigger frame as a JPEG in the local `evidence/` folder, then includes that image with the alert sent to the API. The API stores the image, associates it with the incident record, and exposes it through the authenticated `/incidents/{incident_id}/evidence` endpoint. Operators can view the photo in **Incident details → Captured evidence** before marking the incident verified or dismissed. Existing incidents created before this change will show “No photo”; their original camera frames cannot be reconstructed.
+
+### Use a camera connected to your own Windows PC with the hosted dashboard
+
+A cloud host such as Render does not have access to your laptop's webcam. Run the Python detector on the PC physically connected to the webcam, and send incident alerts to the hosted API. From the repository root, in PowerShell:
+
+```powershell
+$env:SURAKSHAN_ALERT_URL = "https://surakshan-accident-detection-and.onrender.com/alert"
+$env:SURAKSHAN_CAMERA_URL = "0"
+# Only set this if SURAKSHAN_DETECTOR_TOKEN is configured on the hosted API:
+# $env:SURAKSHAN_DETECTOR_TOKEN = "the-same-token-configured-on-the-API"
+python -m live_system.advanced_live
+```
+
+Keep the detector process running while the camera is monitored. If the API has a detector token configured, set the same value in the local environment before launching it. New incidents and their photos should then appear in the hosted dashboard after the alert is accepted.
+
+**Storage note:** the default `evidence/` directory is local filesystem storage. On a free Render web service, files can be lost when the service is restarted or redeployed. Use a persistent disk or external object storage for evidence that must survive deployments. This prototype's stored photos are review aids, not forensic-grade evidence.
