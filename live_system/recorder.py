@@ -50,6 +50,24 @@ class Recorder:
         if frames_to_write is not None:
             self._write_async(frames_to_write, cam_id)
 
+    def save_snapshot(self, frame, cam_id, incident_id):
+        """Save an annotated JPEG for manual incident review."""
+        if frame is None or not hasattr(frame, "shape") or frame.size == 0:
+            return None
+        evidence_dir = PROJECT_ROOT / "evidence"
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+        safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(incident_id)).strip("._") or "incident"
+        safe_cam = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(cam_id)).strip("._") or "camera"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        output_path = evidence_dir / f"accident_{safe_cam}_{safe_id}_{timestamp}.jpg"
+        try:
+            if cv2.imwrite(str(output_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85]):
+                print(f"[RECORDER] Saved incident evidence photo: {output_path}", flush=True)
+                return str(output_path)
+        except Exception as exc:
+            print(f"[RECORDER] Could not save evidence photo: {exc}", flush=True)
+        return None
+
     def start_incident(self, cam_id):
         """Freeze pre-event frames and start collecting subsequent camera frames."""
         with self._lock:
