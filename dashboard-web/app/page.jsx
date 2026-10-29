@@ -25,6 +25,8 @@ export default function Dashboard() {
   const [newUser, setNewUser] = useState({ username: "", password: "", role: "hospital", organization: "" });
   const [assignOrg, setAssignOrg] = useState("");
   const [apiOnline, setApiOnline] = useState(false);
+  const [evidenceUrl, setEvidenceUrl] = useState("");
+  const [evidenceState, setEvidenceState] = useState("idle");
   const [demoMode, setDemoMode] = useState(false);
   const [detectorRunning, setDetectorRunning] = useState(false);
   const [changePassword, setChangePassword] = useState({ current_password: "", new_password: "" });
@@ -94,6 +96,35 @@ export default function Dashboard() {
   useEffect(() => () => streamRef.current?.getTracks().forEach(track => track.stop()), []);
 
   const selected = incidents.find(item => item.incident_id === selectedId) || incidents[0] || null;
+
+  useEffect(() => {
+    let objectUrl = "";
+    let cancelled = false;
+    setEvidenceUrl("");
+    if (!selected?.has_evidence || !token || !API || demoMode) {
+      setEvidenceState(selected?.has_evidence ? "unavailable" : "missing");
+      return () => {};
+    }
+    setEvidenceState("loading");
+    fetch(`${API}/incidents/${encodeURIComponent(selected.incident_id)}/evidence`, {
+      headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
+    }).then(response => {
+      if (!response.ok) throw new Error("Evidence photo unavailable");
+      return response.blob();
+    }).then(blob => {
+      if (cancelled) return;
+      objectUrl = URL.createObjectURL(blob);
+      setEvidenceUrl(objectUrl);
+      setEvidenceState("ready");
+    }).catch(() => {
+      if (!cancelled) setEvidenceState("unavailable");
+    });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [selected?.incident_id, selected?.has_evidence, token, demoMode]);
+
   const filtered = useMemo(() => incidents.filter(item => {
     const text = [item.incident_id, item.camera_id, item.location, item.event, item.status].join(" ").toLowerCase();
     return text.includes(query.toLowerCase()) && (filter === "All" || (filter === "Active" ? !["Resolved", "Dismissed"].includes(item.status) : item.status === filter));
@@ -292,6 +323,10 @@ export default function Dashboard() {
           </section>
           <section className="panel detail-panel"><div className="panel-heading"><div><h2>Incident details</h2><p>Review and response actions</p></div><span className="detail-id">{selected ? selected.incident_id.slice(0,8).toUpperCase() : "—"}</span></div>
             {selected ? <div className="detail-content"><div className="detail-location"><span className="location-icon"><MapPin size={17}/></span><div><strong>{selected.location || "Location not configured"}</strong><small>{selected.camera_id} · {new Date(selected.timestamp).toLocaleString()}</small></div></div>
+              <div className="evidence-card">
+                <div className="evidence-heading"><Camera size={16}/><strong>Captured evidence</strong><span>{evidenceState === "ready" ? "PHOTO SAVED" : evidenceState === "loading" ? "LOADING" : selected.has_evidence ? "UNAVAILABLE" : "NO PHOTO"}</span></div>
+                {evidenceUrl ? <a className="evidence-image-link" href={evidenceUrl} target="_blank" rel="noreferrer"><img className="evidence-image" src={evidenceUrl} alt={`Captured evidence for incident ${selected.incident_id}`}/><small>Open full-size photo</small></a> : <div className="evidence-empty">{evidenceState === "loading" ? "Loading captured frame…" : selected.has_evidence ? "The evidence image could not be loaded. Check backend storage and access." : "No evidence photo is attached. New AI detections will save a review photo when the detector is updated."}</div>}
+              </div>
               <div className="detail-stats"><div><span>Model confidence</span><strong>{typeof selected.confidence === "number" ? Math.round(selected.confidence*100)+"%" : "Not supplied"}</strong><div className="confidence-track"><span style={{width: typeof selected.confidence === "number" ? `${selected.confidence*100}%` : "0%"}}/></div></div><div><span>Incident status</span><strong><span className={`status-badge ${statusClass(selected.status)}`}>{selected.status}</span></strong></div></div>
               {user.role !== "hospital" && <div className="detail-actions"><button className="button button-primary" disabled={busy || selected.status === "Verified"} onClick={() => statusAction("Verified")}><CheckCircle2 size={15}/> Verify</button><button className="button button-secondary" disabled={busy} onClick={() => statusAction("Under Review")}>Review</button><button className="button button-quiet" disabled={busy} onClick={() => statusAction("Dismissed")}>Dismiss</button><button className="button button-quiet" disabled={busy} onClick={() => statusAction("Resolved")}>Resolve</button></div>}
               {user.role !== "hospital" && <><label className="field-label">Hospital organisation<input value={assignOrg} onChange={e => setAssignOrg(e.target.value)} placeholder="Exact organisation name from accounts"/></label><div className="detail-actions"><button className="button button-secondary" disabled={busy || selected.status !== "Verified"} onClick={assignIncident}><Hospital size={15}/> Assign to hospital</button><button className="button button-quiet" disabled={busy || selected.status !== "Verified"} onClick={dispatchAction}><BellRing size={15}/> Simulate dispatch</button></div></>}
