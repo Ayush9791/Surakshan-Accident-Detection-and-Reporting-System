@@ -66,11 +66,14 @@ def main():
                     incident_id = str(uuid.uuid4())
                     print(f"[INCIDENT] Potential accident {incident_id} on {cam_id}", flush=True)
                     logger.log(cam_id, incident_id=incident_id)
+                    # Save the annotated trigger frame and attach it to the remote alert.
+                    evidence_path = recorder.save_snapshot(frame, cam_id, incident_id)
                     recorder.start_incident(cam_id)
                     send_alert(
                         cam_id,
                         incident_id=incident_id,
                         confidence=details["accident_probability"],
+                        image_path=evidence_path,
                     )
 
                 cv2.imshow(cam_id, frame)
