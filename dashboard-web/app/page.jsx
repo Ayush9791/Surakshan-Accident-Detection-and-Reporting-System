@@ -25,6 +25,7 @@ export default function Dashboard() {
   const [newUser, setNewUser] = useState({ username: "", password: "", role: "hospital", organization: "" });
   const [assignOrg, setAssignOrg] = useState("");
   const [apiOnline, setApiOnline] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
   const [detectorRunning, setDetectorRunning] = useState(false);
   const [changePassword, setChangePassword] = useState({ current_password: "", new_password: "" });
   const videoRef = useRef(null);
@@ -41,12 +42,16 @@ export default function Dashboard() {
     }
   }, []);
 
-  const authFetch = useCallback((path, options = {}) => fetch(`${API}${path}`, {
-    ...options,
-    headers: { ...(options.headers || {}), Authorization: `Bearer ${token}`, ...(options.body ? { "Content-Type": "application/json" } : {}) },
-  }), [token]);
+  const authFetch = useCallback((path, options = {}) => {
+    if (demoMode) return Promise.reject(new Error("Offline demo mode: backend actions are disabled."));
+    return fetch(`${API}${path}`, {
+      ...options,
+      headers: { ...(options.headers || {}), Authorization: `Bearer ${token}`, ...(options.body ? { "Content-Type": "application/json" } : {}) },
+    });
+  }, [token, demoMode]);
 
   const loadData = useCallback(async () => {
+    if (demoMode) { setApiOnline(false); return; }
     if (!API) { setApiOnline(false); return; }
     if (!token || !user) return;
     try {
@@ -77,14 +82,14 @@ export default function Dashboard() {
         if (auditResponse.ok) setAudit((await auditResponse.json()).events || []);
       }
     } catch { setApiOnline(false); }
-  }, [token, user, authFetch]);
+  }, [token, user, authFetch, demoMode]);
 
   useEffect(() => {
-    if (!token || !user) return;
+    if (!token || !user || demoMode) return;
     loadData();
     const timer = setInterval(loadData, 5000);
     return () => clearInterval(timer);
-  }, [token, user, loadData]);
+  }, [token, user, loadData, demoMode]);
 
   useEffect(() => () => streamRef.current?.getTracks().forEach(track => track.stop()), []);
 
@@ -102,8 +107,23 @@ export default function Dashboard() {
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
     setCameraOn(false);
-    setToken(""); setUser(null); setIncidents([]); setDispatches([]); setUsers([]); setAudit([]);
+    setToken(""); setUser(null); setDemoMode(false); setApiOnline(false); setIncidents([]); setDispatches([]); setUsers([]); setAudit([]);
     setSelectedId(""); setAssignOrg(""); setNotice(""); setCameraError("");
+  }
+
+  function enterOfflineDemo() {
+    setDemoMode(true);
+    setToken("offline-demo-no-api-token");
+    setUser({ username: "admin-demo", role: "admin", organization: "Offline Demonstration" });
+    setApiOnline(false);
+    setIncidents([
+      { incident_id: "DEMO-001", timestamp: new Date().toISOString(), camera_id: "CAM-01", location: "Main Road Junction", event: "SIMULATED_POTENTIAL_ACCIDENT", confidence: 0.93, status: "New", assigned_to: "" },
+      { incident_id: "DEMO-002", timestamp: new Date(Date.now() - 3600000).toISOString(), camera_id: "CAM-02", location: "College Gate", event: "SIMULATED_POTENTIAL_ACCIDENT", confidence: 0.87, status: "Verified", assigned_to: "Demo General Hospital" },
+    ]);
+    setDispatches([{ notification_id: "DEMO-DISPATCH-01", incident_id: "DEMO-002", timestamp: new Date(Date.now() - 1800000).toISOString(), destination: "DEMO-CONTROL-ROOM", channel: "offline-preview", result: "SIMULATED" }]);
+    setUsers([{ username: "authority-demo", role: "authority", organization: "Demo Traffic Control Room" }, { username: "hospital-demo", role: "hospital", organization: "Demo General Hospital" }]);
+    setAudit([{ audit_id: "DEMO-AUDIT-01", action: "offline_demo_opened", username: "admin-demo", timestamp: new Date().toISOString(), details: "Local mock data only; no backend authentication." }]);
+    setNotice("Offline demo mode. All records are mock data; backend operations are disabled.");
   }
 
   async function signIn(event) {
@@ -229,7 +249,8 @@ export default function Dashboard() {
       <label>Password<input required type="password" autoComplete="current-password" value={login.password} onChange={e => setLogin({ ...login, password: e.target.value })} /></label>
       {loginError && <div className="error-box">{loginError}</div>}
       <button className="button button-primary full-width" disabled={busy}>{busy ? "Signing in…" : "Sign in securely"}</button>
-      <div className="login-help"><strong>Local development</strong><br />Demo accounts are documented in the repository README. Change their passwords before sharing this application.<small>Dispatch is simulated; no emergency service is contacted.</small></div>
+      <button type="button" className="button button-secondary full-width" onClick={enterOfflineDemo} disabled={busy}>Open admin demo offline</button>
+      <div className="login-help"><strong>Offline preview</strong><br />Use the offline demo to preview the admin interface when the API is unavailable. It uses mock records only and does not authenticate you to the backend.<small>Live account management, incident updates, detector controls, and dispatch actions require the backend.</small></div>
       <small className="login-foot">Demo environment · Dispatch is simulated</small>
     </form>
   </main>;
@@ -252,6 +273,7 @@ export default function Dashboard() {
     <section className="main-area" id="overview">
       <header className="topbar"><div className="breadcrumb"><span>Operations</span><span>/</span><strong>{user.role === "hospital" ? "Hospital desk" : user.role === "authority" ? "Authority control room" : "Administration"}</strong></div><div className="topbar-right"><span className="system-state"><span className={apiOnline ? "live-dot" : "offline-dot"}/>{apiOnline ? "API ONLINE" : "API OFFLINE"}</span><span className="avatar">{user.username.slice(0,2).toUpperCase()}</span></div></header>
       <div className="page-content">
+        {demoMode && <div className="notice" role="status"><span><strong>OFFLINE DEMO MODE:</strong> Sample data only. No real admin session or backend access is granted, and changes cannot be saved.</span></div>}
         <div className="page-heading"><div><div className="eyebrow">{(user.organization || "OPERATIONS").toUpperCase()}</div><h1>{user.role === "hospital" ? "Hospital incident desk" : user.role === "authority" ? "Authority operations" : "Operations overview"}</h1><p>{user.role === "hospital" ? "Review incidents verified by the control room and assigned to your organisation." : "Monitor potential accidents, review incident status and coordinate simulated responses."}</p></div><div className="heading-actions"><span className="updated-label"><span className={apiOnline ? "live-dot" : "offline-dot"}/> {apiOnline ? "Connected" : "Disconnected"}</span>{user.role !== "hospital" && <button className="button button-primary" onClick={createTestIncident} disabled={busy}><AlertTriangle size={15}/> Create test incident</button>}</div></div>
         {notice && <div className="notice" role="status"><span>{notice}</span><button onClick={() => setNotice("")} aria-label="Dismiss"><XCircle size={16}/></button></div>}
         <div className="metrics-grid">
