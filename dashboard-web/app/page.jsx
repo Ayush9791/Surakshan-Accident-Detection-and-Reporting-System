@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, AlertTriangle, BellRing, Camera, CheckCircle2, CircleUserRound, ClipboardList, Hospital, LogOut, MapPin, RefreshCw, ShieldCheck, Siren, UserPlus, Video, XCircle } from "lucide-react";
 
-const API = (process.env.NEXT_PUBLIC_SURAKSHAN_API_URL || "http://127.0.0.1:5000").replace(/\/$/, "");
+const API = (process.env.NEXT_PUBLIC_SURAKSHAN_API_URL || (process.env.NODE_ENV === "development" ? "http://127.0.0.1:5000" : "")).replace(/\/$/, "");
 const STATUSES = ["New", "Under Review", "Verified", "Dismissed", "Resolved"];
 
 export default function Dashboard() {
@@ -32,7 +32,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     const savedToken = window.localStorage.getItem("surakshan_token");
-    if (savedToken) {
+    if (savedToken && API) {
       setToken(savedToken);
       fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${savedToken}` } })
         .then(r => r.ok ? r.json() : Promise.reject())
@@ -47,6 +47,7 @@ export default function Dashboard() {
   }), [token]);
 
   const loadData = useCallback(async () => {
+    if (!API) { setApiOnline(false); return; }
     if (!token || !user) return;
     try {
       const response = await authFetch("/incidents?limit=200", { cache: "no-store" });
@@ -108,6 +109,7 @@ export default function Dashboard() {
   async function signIn(event) {
     event.preventDefault(); setLoginError(""); setBusy(true);
     try {
+      if (!API) throw new Error("Backend URL is not configured. Set NEXT_PUBLIC_SURAKSHAN_API_URL in Vercel Environment Variables, then redeploy.");
       const response = await fetch(`${API}/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(login) });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || "Sign-in failed");
