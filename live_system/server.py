@@ -35,10 +35,30 @@ DETECTOR_LOG.parent.mkdir(parents=True, exist_ok=True)
 DETECTOR_LOG_HANDLE = None
 STATUSES = {"New", "Under Review", "Verified", "Dismissed", "Resolved"}
 app = FastAPI(title="Surakshan Incident API", version="2.0.0")
-origins = [x.strip() for x in os.environ.get("SURAKSHAN_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if x.strip()]
-app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=False,
-                   allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
-                   allow_headers=["Content-Type", "Authorization", "X-Detector-Token"])
+
+# Keep production dashboard origins in code as safe defaults so a missing Render
+# environment variable cannot silently break browser preflight requests.
+DEFAULT_CORS_ORIGINS = {
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://surakshan-accident-detection-and-re.vercel.app",
+    "https://surakshan-accident-detection-and-reporting-system-61f477lej.vercel.app",
+    "https://surakshan-accident-detection-and-reporting-ayush-deeps-projects.vercel.app",
+    "https://surakshan-accident-detection-and-reporting-system.vercel.app",
+}
+configured_origins = {
+    origin.strip().rstrip("/")
+    for origin in os.environ.get("SURAKSHAN_CORS_ORIGINS", "").split(",")
+    if origin.strip()
+}
+origins = sorted(DEFAULT_CORS_ORIGINS | configured_origins)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class AlertPayload(BaseModel):
@@ -189,6 +209,11 @@ def require_roles(*roles):
             raise HTTPException(status_code=403, detail="Your role cannot perform this action")
         return user
     return check
+
+
+@app.get("/")
+def root():
+    return {"status": "ok", "service": "surakshan-api", "health": "/health", "docs": "/docs"}
 
 
 @app.get("/health")
