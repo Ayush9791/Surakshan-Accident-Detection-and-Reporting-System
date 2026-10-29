@@ -32,6 +32,22 @@ Open http://localhost:3000.
 
 These are local demo credentials. Change the passwords after signing in; do not use these defaults on a public server. Admins can create additional authority/hospital accounts.
 
+## Deploy dashboard to Vercel
+
+1. Import this GitHub repository into Vercel.
+2. Set **Root Directory** to `dashboard-web`.
+3. Keep the Framework Preset as **Next.js** and use the default build command (`npm run build`).
+4. Add this environment variable in **Project Settings → Environment Variables**:
+
+   `NEXT_PUBLIC_SURAKSHAN_API_URL=https://YOUR-PUBLIC-BACKEND-URL`
+
+   Replace the example value with the public HTTPS URL of the deployed FastAPI service. Do not use `127.0.0.1` or `localhost` for a cloud deployment.
+5. Redeploy after adding or changing the environment variable.
+
+The Python FastAPI service is separate from the Vercel frontend and must be hosted on a service that supports the project's Python dependencies. Set `SURAKSHAN_CORS_ORIGINS` on the backend to the exact Vercel dashboard origin, for example `https://your-project.vercel.app`. Configure `SURAKSHAN_AUTH_SECRET` and strong demo-account passwords as backend environment variables before sharing the deployment.
+
+Vercel hosts the dashboard only. Continuous CCTV capture and OpenCV inference require a persistent backend machine with access to the camera; a cloud dashboard cannot access a webcam attached to your laptop. The default SQLite database is local to the backend filesystem and may not persist on hosts with ephemeral storage, so use persistent storage or a managed database for data that must survive restarts.
+
 ## Workflows
 
 - Admin: all incidents, account creation, audit trail, detector controls, status updates, hospital assignment and simulated dispatch.
