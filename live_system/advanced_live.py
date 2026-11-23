@@ -13,14 +13,15 @@ from live_system.api import send_alert
 from live_system.camera import CameraStream, normalize_camera_source
 from live_system.incident import IncidentGate
 from live_system.logger import AccidentLogger
-from live_system.predict import predict_frame_details
+from live_system.predict import predict_frame_details, reset_predictor
 from live_system.recorder import Recorder
 
 
-# Default to the local webcam. Configure IP Webcam explicitly through the
-# environment so a stale private IP never breaks a fresh checkout.
+# Default to the configured IP Webcam; the environment variable can override it.
 CAMERA_SOURCES = {
-    "Camera 1": normalize_camera_source(os.environ.get("SURAKSHAN_CAMERA_URL", "0")),
+    "Camera 1": normalize_camera_source(
+        os.environ.get("SURAKSHAN_CAMERA_URL", "http://10.63.101.159:8080/video")
+    ),
 }
 
 
@@ -33,12 +34,13 @@ def main():
     try:
         for cam_id, source in CAMERA_SOURCES.items():
             print(f"[CAMERA] Opening {cam_id}: {source}", flush=True)
+
             stream = CameraStream(source)
             streams[cam_id] = stream
             if not stream.wait_until_ready(timeout=8.0):
                 raise RuntimeError(
                     f"Camera source {source!r} opened but no video frames arrived. "
-                    "For IP Webcam, use http://PHONE_IP:8080/video, keep the app's "
+                    "For IP Webcam, use http://10.63.101.159:8080/video, keep the app's "
                     "server running, and confirm the URL works from this computer."
                 )
             recorders[cam_id] = Recorder()
@@ -51,7 +53,7 @@ def main():
                 if not ret or frame is None:
                     continue
 
-                details = predict_frame_details(frame)
+                details = predict_frame_details(frame, stream_id=cam_id)
                 label = details["label"]
                 color = (0, 0, 255) if label == "ACCIDENT" else (0, 255, 0)
                 cv2.putText(
@@ -62,7 +64,7 @@ def main():
                 recorder = recorders[cam_id]
                 recorder.add_frame(frame)
 
-                if gates[cam_id].update(label):
+                if details["is_new_prediction"] and gates[cam_id].update(label):
                     incident_id = str(uuid.uuid4())
                     print(f"[INCIDENT] Potential accident {incident_id} on {cam_id}", flush=True)
                     logger.log(cam_id, incident_id=incident_id)
@@ -82,6 +84,8 @@ def main():
     finally:
         for stream in streams.values():
             stream.stop()
+        for cam_id in CAMERA_SOURCES:
+            reset_predictor(cam_id)
         for recorder in recorders.values():
             recorder.close()
         cv2.destroyAllWindows()

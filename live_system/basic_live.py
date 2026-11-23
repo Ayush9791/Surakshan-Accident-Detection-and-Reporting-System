@@ -19,7 +19,7 @@ def main():
             if not ret:
                 print("Failed to grab a camera frame.")
                 break
-            details = predict_frame_details(frame)
+            details = predict_frame_details(frame, stream_id="basic")
             label = details["label"]
             color = (0, 0, 255) if label == "ACCIDENT" else (0, 255, 0)
             cv2.putText(

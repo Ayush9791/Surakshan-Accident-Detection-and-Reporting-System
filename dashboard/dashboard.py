@@ -15,14 +15,18 @@ from live_system.api import send_alert
 from live_system.camera import CameraStream, normalize_camera_source
 from live_system.incident import IncidentGate
 from live_system.logger import AccidentLogger
-from live_system.predict import predict_frame_details
+from live_system.predict import predict_frame_details, reset_predictor
 from live_system.recorder import Recorder
 
 st.set_page_config(page_title="Surakshan Dashboard", layout="wide")
 st.title("Surakshan Accident Detection Dashboard")
 st.caption("Detections are potential incidents and require human verification.")
 
-SOURCES = {"Camera 1": normalize_camera_source(os.environ.get("SURAKSHAN_CAMERA_URL", "0"))}
+SOURCES = {
+    "Camera 1": normalize_camera_source(
+        os.environ.get("SURAKSHAN_CAMERA_URL", "http://10.63.101.159:8080/video")
+    )
+}
 for key, default in (
     ("running", False), ("streams", {}), ("recorders", {}),
     ("gates", {}), ("logger", None),
@@ -40,6 +44,8 @@ def stop_monitoring():
     st.session_state.streams = {}
     st.session_state.recorders = {}
     st.session_state.gates = {}
+    for camera_id in SOURCES:
+        reset_predictor(camera_id)
 
 
 left, right = st.columns(2)
@@ -80,14 +86,14 @@ def show_cameras():
             if not ok or frame is None:
                 st.warning("No camera signal.")
                 continue
-            details = predict_frame_details(frame)
+            details = predict_frame_details(frame, stream_id=camera_id)
             label = details["label"]
             color = (0, 0, 255) if label == "ACCIDENT" else (0, 255, 0)
             cv2.putText(frame, f"{label} ({details['confidence']:.0%})",
                         (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
             recorder = st.session_state.recorders[camera_id]
             recorder.add_frame(frame)
-            if st.session_state.gates[camera_id].update(label):
+            if details["is_new_prediction"] and st.session_state.gates[camera_id].update(label):
                 incident_id = str(uuid.uuid4())
                 st.session_state.logger.log(camera_id, incident_id=incident_id)
                 recorder.start_incident(camera_id)

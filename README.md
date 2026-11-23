@@ -1,6 +1,6 @@
 # Surakshan — Traffic Incident Detection and Response Platform
 
-Surakshan is a college-project prototype that combines webcam-based accident classification, incident persistence, role-based web dashboards, hospital assignment, audit logging, and simulated emergency notifications. It is designed to be demonstrated at zero cost on a Windows PC. The current CNN is a baseline and can be retrained/replaced later.
+Surakshan is a college-project prototype that combines webcam-based accident classification, incident persistence, role-based web dashboards, hospital assignment, audit logging, and simulated emergency notifications. It is designed to be demonstrated at zero cost on a Windows PC. The selected detector is a temporal R3D-18 video model; it remains a research prototype and has weak performance on unseen camera footage.
 
 > **Important:** this is not a certified emergency system. The AI can miss incidents or raise false alerts. Dispatch is simulated only; no police, ambulance, hospital, or emergency service is contacted. The API and demo accounts are not production-hardened. Do not expose the service publicly as-is.
 
@@ -81,12 +81,12 @@ To use different seeded passwords on a fresh database, set `SURAKSHAN_ADMIN_PASS
 5. Sign out and sign in as `hospital`. The verified incident should appear in the hospital queue.
 6. Use **Account management** to create additional authority/hospital users.
 7. Use **Start AI detector** to launch the Python inference process on the computer running the API. It opens an OpenCV window and writes logs to `logs/detector.log`. Stop the browser preview before starting the Python detector.
-8. By default, the detector uses the local webcam (`SURAKSHAN_CAMERA_URL=0`). To use Android IP Webcam, start its server on the phone, open the displayed IP address from the laptop, then set the stream URL in the same PowerShell session **before starting the API**:
+8. By default, the detector uses your Android IP Webcam stream at `http://10.63.101.159:8080/video`. Start the phone's server and confirm that URL opens from the laptop. You can override it by setting `SURAKSHAN_CAMERA_URL` in the same PowerShell session before starting the API:
    ```powershell
-   $env:SURAKSHAN_CAMERA_URL = "http://192.168.1.105:8080/video"
+   $env:SURAKSHAN_CAMERA_URL = "http://10.63.101.159:8080/video"
    uvicorn live_system.server:app --host 127.0.0.1 --port 5000
    ```
-   Replace `192.168.1.105` with the phone's actual IP. Use `http`, not `https`, and include `/video`. Keep both devices on a network that permits device-to-device traffic. The API's detector subprocess inherits this setting. If the stream opens but has no frames, check `logs/detector.log`.
+   Use `http`, not `https`, and include `/video`. Keep both devices on a network that permits device-to-device traffic. The API's detector subprocess inherits this setting. If the stream opens but has no frames, check `logs/detector.log`.
 9. When a positive event passes the existing incident gate, the detector submits an incident to the API. Review it in the dashboard. Model output remains a potential incident until a human verifies it.
 
 ## Roles and permissions
@@ -112,13 +112,17 @@ npm run build
 
 ## AI model and dataset plan
 
-The current frame-level CNN is a baseline, not a validated real-world crash detector. Training a stronger model is a separate stage.
+The last trained candidate was a Kinetics-initialized R3D-18 temporal classifier, fine-tuned on the real and synthetic ACCIDENT benchmark data. The old video transform cropped the center of each frame and excluded the annotated accident center in about 11% of real clips. The candidate kept the whole frame using an aspect-preserving letterbox transform. Additional reviewed normal clips from the Zenodo road-monitoring collection were tried in a separate training run, but did not improve held-out performance. The model checkpoint was deleted at the user's request; run the training script to create a new one.
 
-Start by benchmarking the CCTV-focused **ACCIDENT** dataset:
+The training and held-out evaluation use the CCTV-focused **ACCIDENT** dataset:
 - Dataset and benchmark: https://accidentbench.github.io/
 - Paper: https://openaccess.thecvf.com/content/CVPR2026W/AUTOPILOT/html/Picek_ACCIDENT_A_Benchmark_Dataset_for_Vehicle_Accident_Detection_from_Traffic_CVPRW_2026_paper.html
 
 Recommended future approach: pretrained vehicle detector + multi-object tracker + temporal accident-recognition model. Split train/validation/test by source video or camera, include hard negative traffic events, and report event recall, false alerts per camera-hour, detection delay, and performance on unseen cameras. Check dataset licensing and annotation formats before use.
+
+The ACCIDENT dataset is available to the trainer at `dataset/ACCIDENT` through a local link to `C:\Users\AYUSH\Downloads\archive (1)`; this avoids copying about 15 GB. To train from scratch, run `python train.py`. It caches decoded clips so extraction can resume, selects the checkpoint and alert threshold using source-grouped validation data, and evaluates the geo-aware test split once at the end. Add `--include-reviewed-normal-data` to include clips from `dataset/traffic_eval_ccby/verified_normal_videos.txt` as training-only negatives. That local subset is from [Zenodo record 14041920](https://doi.org/10.5281/zenodo.14041920), licensed CC BY 4.0; see `dataset/traffic_eval_ccby/SOURCE.txt` for attribution.
+
+Before deletion, the last checkpoint scored 59.1% accuracy and 58.0% balanced accuracy on the geo-aware held-out real ACCIDENT split at its source-grouped validation-selected threshold (0.58). At threshold 0.50 it scored 59.9% accuracy, 57.7% balanced accuracy, and 49.6% specificity. The full-frame change improved the earlier result modestly, but results are still too weak for dependable real-world alerts.
 
 ## Zero-cost deployment guidance
 
@@ -128,7 +132,7 @@ Optional free-tier hosting can be explored later, but providers change limits, m
 
 ## Current limitations
 
-- The existing model is frame-based; temporal crash recognition has not been trained yet.
+- The temporal model remains weak on unseen surveillance footage and can miss crashes or raise false alerts.
 - The browser webcam preview is only a preview. AI inference runs in the Python detector process on the API host.
 - The detector's OpenCV window is local to the API host; it is not streamed into the web dashboard.
 - The dashboard evidence panel does not yet play saved incident clips.

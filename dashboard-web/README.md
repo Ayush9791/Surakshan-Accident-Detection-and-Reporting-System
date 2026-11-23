@@ -55,12 +55,12 @@ Vercel hosts the dashboard only. Continuous CCTV capture and OpenCV inference re
 - Hospital: only verified/resolved incidents assigned to its organisation.
 - Incident records, assignments, users and simulated dispatches persist in SQLite.
 - Browser webcam preview is only a preview. **Start AI detector** launches `python -m live_system.advanced_live` on the same host as the API.
-- The detector defaults to camera index `0`. For Android IP Webcam, start the phone's server and set `SURAKSHAN_CAMERA_URL` in the PowerShell session before starting the API, for example:
+- The detector defaults to `http://10.63.101.159:8080/video`. Start the phone's IP Webcam server and confirm that URL opens from the laptop. You can override the default with `SURAKSHAN_CAMERA_URL` in the PowerShell session before starting the API:
   ```powershell
-  $env:SURAKSHAN_CAMERA_URL = "http://192.168.1.105:8080/video"
+  $env:SURAKSHAN_CAMERA_URL = "http://10.63.101.159:8080/video"
   uvicorn live_system.server:app --host 127.0.0.1 --port 5000
   ```
-  Replace the IP with the phone's actual address. Use HTTP and include `/video`; confirm the stream opens from the laptop. Detector logs are written to `logs/detector.log`.
+  Use HTTP and include `/video`; confirm the stream opens from the laptop. Detector logs are written to `logs/detector.log`.
 - Demo incident creation uses an authenticated operator endpoint. Hospital assignment and simulated dispatch are available only after an incident is verified.
 - Simulated dispatch only records a local notification. It never contacts real authorities.
 

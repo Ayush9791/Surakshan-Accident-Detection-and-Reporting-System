@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, AlertTriangle, BellRing, Camera, CheckCircle2, CircleUserRound, ClipboardList, Hospital, LogOut, MapPin, RefreshCw, ShieldCheck, Siren, UserPlus, Video, XCircle } from "lucide-react";
 
 const API = (process.env.NEXT_PUBLIC_SURAKSHAN_API_URL || (process.env.NODE_ENV === "development" ? "http://127.0.0.1:5000" : "")).replace(/\/$/, "");
+const IP_CAMERA_STREAM = "http://10.63.101.159:8080/video";
 const STATUSES = ["New", "Under Review", "Verified", "Dismissed", "Resolved"];
 
 export default function Dashboard() {
@@ -30,8 +31,6 @@ export default function Dashboard() {
   const [demoMode, setDemoMode] = useState(false);
   const [detectorRunning, setDetectorRunning] = useState(false);
   const [changePassword, setChangePassword] = useState({ current_password: "", new_password: "" });
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
 
   useEffect(() => {
     const savedToken = window.localStorage.getItem("surakshan_token");
@@ -60,8 +59,6 @@ export default function Dashboard() {
       const response = await authFetch("/incidents?limit=200", { cache: "no-store" });
       if (response.status === 401) {
         window.localStorage.removeItem("surakshan_token");
-        streamRef.current?.getTracks().forEach(track => track.stop());
-        streamRef.current = null;
         setCameraOn(false);
         setToken("");
         setUser(null);
@@ -92,8 +89,6 @@ export default function Dashboard() {
     const timer = setInterval(loadData, 5000);
     return () => clearInterval(timer);
   }, [token, user, loadData, demoMode]);
-
-  useEffect(() => () => streamRef.current?.getTracks().forEach(track => track.stop()), []);
 
   const selected = incidents.find(item => item.incident_id === selectedId) || incidents[0] || null;
 
@@ -134,9 +129,6 @@ export default function Dashboard() {
 
   function logout() {
     window.localStorage.removeItem("surakshan_token");
-    streamRef.current?.getTracks().forEach(track => track.stop());
-    streamRef.current = null;
-    if (videoRef.current) videoRef.current.srcObject = null;
     setCameraOn(false);
     setToken(""); setUser(null); setDemoMode(false); setApiOnline(false); setIncidents([]); setDispatches([]); setUsers([]); setAudit([]);
     setSelectedId(""); setAssignOrg(""); setNotice(""); setCameraError("");
@@ -259,15 +251,9 @@ export default function Dashboard() {
     finally { setBusy(false); }
   }
 
-  async function toggleCamera() {
+  function toggleCamera() {
     setCameraError("");
-    if (cameraOn) { streamRef.current?.getTracks().forEach(track => track.stop()); streamRef.current = null; setCameraOn(false); return; }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      streamRef.current = stream;
-      if (videoRef.current) videoRef.current.srcObject = stream;
-      setCameraOn(true);
-    } catch (error) { setCameraError(error.name === "NotAllowedError" ? "Camera permission denied. Allow access in browser settings." : "No accessible webcam found."); }
+    setCameraOn(value => !value);
   }
 
   if (!user) return <main className="login-shell">
@@ -336,11 +322,24 @@ export default function Dashboard() {
           </section>
         </div>
         <div className="lower-grid">
-          <section className="panel camera-panel" id="camera"><div className="panel-heading"><div><h2>Local webcam preview</h2><p>Browser preview only; model inference remains in the Python process</p></div><span className="stream-pill"><span className={cameraOn ? "live-dot" : "offline-dot"}/>{cameraOn ? "PREVIEW LIVE" : "STOPPED"}</span></div>
-            <div className="camera-preview"><video ref={videoRef} autoPlay playsInline muted className={cameraOn ? "webcam-video visible" : "webcam-video"}/>{!cameraOn && <div className="camera-placeholder"><Camera size={28}/><strong>Camera preview stopped</strong><span>Allow browser camera access to start.</span></div>}</div>
-            {cameraError && <p className="error-text">{cameraError}</p>}<div className="camera-controls"><div><span className={detectorRunning ? "live-dot" : "offline-dot"}/>{detectorRunning ? "Python detector running on API host" : "Python detector stopped"}</div><div className="camera-control-buttons"><button className={cameraOn ? "button button-secondary" : "button button-quiet"} onClick={toggleCamera}>{cameraOn ? "Stop browser preview" : "Preview webcam"}</button>{user.role !== "hospital" && <button className={detectorRunning ? "button button-secondary" : "button button-primary"} disabled={busy || cameraOn} onClick={() => detectorAction(detectorRunning ? "stop" : "start")}>{detectorRunning ? "Stop AI detector" : "Start AI detector"}</button>}</div></div>{cameraOn && detectorRunning && <p className="error-text">Stop one camera client before starting the other; both may compete for the same webcam.</p>}<p className="camera-disclaimer">The browser preview is not AI. Start AI detector to launch the existing Python inference process on the API host; it opens an OpenCV window on that machine and writes output to logs/detector.log. This works when the API runs on the computer connected to the webcam, not on a cloud host without a camera.</p>
-          </section>
-          {user.role !== "hospital" && <section className="panel dispatch-panel" id="dispatch"><div className="panel-heading"><div><h2>Simulated dispatch log</h2><p>No external notifications are sent</p></div><span className="panel-pill">{dispatches.length} EVENTS</span></div><div className="dispatch-list">{dispatches.length === 0 ? <div className="empty-state compact"><BellRing size={22}/><strong>No simulated dispatches</strong><span>Select an incident and use Simulate dispatch.</span></div> : dispatches.slice(0,8).map(item => <div className="dispatch-row" key={item.notification_id}><span className="dispatch-icon"><BellRing size={15}/></span><div><strong>{item.destination}</strong><small>{item.incident_id} · {new Date(item.timestamp).toLocaleString()}</small></div><span className="simulated-tag">SIMULATED</span></div>)}</div><div className="dispatch-note"><ShieldCheck size={15}/>Simulated records only; no authority has been contacted.</div></section>}
+          <section className="panel camera-panel" id="camera">
+            <div className="panel-heading">
+              <div><h2>IP camera preview</h2><p>Android IP Webcam · {IP_CAMERA_STREAM}</p></div>
+              <span className="stream-pill"><span className={cameraOn ? "live-dot" : "offline-dot"}/>{cameraOn ? "PREVIEW LIVE" : "STOPPED"}</span>
+            </div>
+            <div className="camera-preview">
+              {cameraOn ? <img src={IP_CAMERA_STREAM} alt="Live IP camera stream" className="webcam-video visible" onError={() => { setCameraError("Could not load the IP stream. Check the phone's server and address."); setCameraOn(false); }}/> : <div className="camera-placeholder"><Camera size={28}/><strong>IP camera preview stopped</strong><span>Start the preview to connect to the phone.</span></div>}
+            </div>
+            {cameraError && <p className="error-text">{cameraError}</p>}
+            <div className="camera-controls">
+              <div><span className={detectorRunning ? "live-dot" : "offline-dot"}/>{detectorRunning ? "Python detector running on API host" : "Python detector stopped"}</div>
+              <div className="camera-control-buttons">
+                <button className={cameraOn ? "button button-secondary" : "button button-quiet"} onClick={toggleCamera}>{cameraOn ? "Stop IP preview" : "Preview IP camera"}</button>
+                {user.role !== "hospital" && <button className={detectorRunning ? "button button-secondary" : "button button-primary"} disabled={busy || cameraOn} onClick={() => detectorAction(detectorRunning ? "stop" : "start")}>{detectorRunning ? "Stop AI detector" : "Start AI detector"}</button>}
+              </div>
+            </div>
+            <p className="camera-disclaimer">The browser preview connects directly to the phone. A cloud API host cannot reach this private tether address; run the detector on the PC connected to the phone and send alerts to the hosted API.</p>
+          </section>          {user.role !== "hospital" && <section className="panel dispatch-panel" id="dispatch"><div className="panel-heading"><div><h2>Simulated dispatch log</h2><p>No external notifications are sent</p></div><span className="panel-pill">{dispatches.length} EVENTS</span></div><div className="dispatch-list">{dispatches.length === 0 ? <div className="empty-state compact"><BellRing size={22}/><strong>No simulated dispatches</strong><span>Select an incident and use Simulate dispatch.</span></div> : dispatches.slice(0,8).map(item => <div className="dispatch-row" key={item.notification_id}><span className="dispatch-icon"><BellRing size={15}/></span><div><strong>{item.destination}</strong><small>{item.incident_id} · {new Date(item.timestamp).toLocaleString()}</small></div><span className="simulated-tag">SIMULATED</span></div>)}</div><div className="dispatch-note"><ShieldCheck size={15}/>Simulated records only; no authority has been contacted.</div></section>}
         </div>
         {user.role === "admin" && <div className="admin-grid" id="accounts">
           <section className="panel"><div className="panel-heading"><div><h2>Account management</h2><p>Create authority and hospital logins</p></div><UserPlus size={18}/></div><form className="admin-form" onSubmit={createAccount}><label>Username<input required minLength={3} value={newUser.username} onChange={e => setNewUser({...newUser, username:e.target.value})} placeholder="e.g. city_control"/></label><label>Temporary password<input required type="password" minLength={10} value={newUser.password} onChange={e => setNewUser({...newUser,password:e.target.value})} placeholder="At least 10 characters"/></label><label>Role<select value={newUser.role} onChange={e => setNewUser({...newUser,role:e.target.value})}><option value="authority">Traffic authority</option><option value="hospital">Hospital</option></select></label><label>Organisation<input required value={newUser.organization} onChange={e => setNewUser({...newUser,organization:e.target.value})} placeholder="Official organisation name"/></label><button className="button button-primary" disabled={busy}><UserPlus size={15}/> Create account</button></form><div className="user-list">{users.map(account => <div className="user-row" key={account.username}><CircleUserRound size={16}/><span><strong>{account.username}</strong><small>{account.organization}</small></span><span className="status-badge status-review">{account.role}</span></div>)}</div></section>
