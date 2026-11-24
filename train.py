@@ -224,6 +224,14 @@ def read_frame_manifest(dataset_root: Path):
 def preprocess_image(path):
     """Match live_system/predict.py preprocessing exactly."""
 
+    # tf.py_function passes an EagerTensor; decode it before calling OpenCV.
+    if hasattr(path, "numpy"):
+        path = path.numpy()
+    if isinstance(path, (bytes, bytearray, np.bytes_)):
+        path = path.decode("utf-8")
+    else:
+        path = str(path)
+
     image = cv2.imread(path, cv2.IMREAD_COLOR)
 
     if image is None:
@@ -492,7 +500,7 @@ def main():
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path("configs/resnet18_training.json"),
+        default=Path("configs/keras_training.json"),
     )
 
     parser.add_argument("--epochs", type=int)
@@ -724,10 +732,10 @@ def main():
         "seed": seed,
     }
 
-    save_json(
-        RESULTS_ROOT / "model_metadata.json",
-        metadata,
-    )
+    # Keep inference metadata beside the weights so deployment can use the
+    # exact validation-selected threshold without relying on ignored results/.
+    save_json(MODEL_PATH.parent / "model_metadata.json", metadata)
+    save_json(RESULTS_ROOT / "model_metadata.json", metadata)
 
     save_json(
         RESULTS_ROOT / "training_history.json",
