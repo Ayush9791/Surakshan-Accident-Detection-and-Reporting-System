@@ -7,7 +7,7 @@ from video_pipeline.preprocess import load_config, prepare_video_dataset
 
 def main():
     parser = argparse.ArgumentParser(description="Audit and sample labeled videos into source-grouped image frames.")
-    parser.add_argument("--config", type=Path, default=Path("configs/resnet18_training.json"))
+    parser.add_argument("--config", type=Path, default=Path("configs/keras_training.json"))
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--force-audit", action="store_true", help="Re-read and hash every source video.")
     args = parser.parse_args()
