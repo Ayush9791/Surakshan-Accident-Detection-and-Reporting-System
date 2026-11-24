@@ -510,7 +510,9 @@ def detector_start(payload: DetectorStartPayload, user: dict = Depends(require_r
             raise HTTPException(status_code=422, detail="IP Webcam URL must start with http:// or https://.")
         detector_env["SURAKSHAN_CAMERA_URL"] = camera_url
     elif payload.source == "video-file":
-        video_path = Path(payload.video_path).expanduser()
+        # Use the bundled repository-root clip when the dashboard leaves the path blank.
+        requested_path = payload.video_path.strip() or "Accident_Detection.mp4"
+        video_path = Path(requested_path).expanduser()
         if not video_path.is_absolute():
             video_path = (PROJECT_ROOT / video_path).resolve()
         else:
