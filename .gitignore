@@ -13,49 +13,45 @@ env/
 .env.*
 !.env.example
 
-# Generated local artifacts
+# Local datasets and generated preprocessing artifacts
 dataset/ACCIDENT/
 dataset/train/
 dataset/val/
 dataset/test/
 dataset/rebuilt_video/
 dataset/resnet18_frames/
+dataset/keras_frames/
 dataset/frame_split_manifest.json
 dataset/dataset_stats.json
+dataset/cache/
+dataset/.accident_frames_build/
 vid_dataset/
+source_videos_archive/
 results/
+
+# Runtime state and evidence
 logs/*.log
 data/*.db
 data/*.db-*
+evidence/*
+!evidence/.gitkeep
 clips/*.mp4
 clips/*.avi
+
+# Large/legacy model artifacts. The active Keras weights file remains tracked.
+models/**/*.pth
+models/**/*.pt
+models/**/*.ckpt
+models/**/*.onnx
+models/**/*.pb
 
 # Editors and operating systems
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
-
-# OS/editor temporary files
 *.swp
 *.tmp
-dataset/cache/
-dataset/.accident_frames_build/
-source_videos_archive/
-dataset/accidentbench_frames/
-dataset/accidentbench_embeddings.pt
-dataset/accidentbench_feature_cache/
-dataset/accidentbench_r3d_embeddings.pt
-dataset/accidentbench_r3d_feature_cache/
-dataset/accidentbench_r3d_clips.npy
-dataset/accidentbench_r3d_clips.expanded.npy
-dataset/accidentbench_r3d_raw_cache/
-dataset/surakshan_model_before_normal_traffic_adaptation.pth
-dataset/traffic_eval_ccby/*.mp4
-dataset/traffic_eval_ccby/*.mp4.part
-dataset/traffic_eval_ccby/*.review.jpg
-dataset/traffic_eval_contact*.jpg
-dataset/traffic_eval_contact2.jpg
 
 # Node / Next.js dashboard
 node_modules/
