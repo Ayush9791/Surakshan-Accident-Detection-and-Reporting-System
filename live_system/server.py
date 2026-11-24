@@ -528,7 +528,9 @@ def detector_start(payload: DetectorStartPayload, user: dict = Depends(require_r
         return {"running": True, "message": "Detector is already running"}
     detector_env = os.environ.copy()
     detector_env["SURAKSHAN_CAMERA_SOURCE"] = payload.source
-    detector_env["SURAKSHAN_HEADLESS"] = "1"
+    # Local Windows runs should show the OpenCV inference window. Linux hosts
+    # (such as Render) remain headless because they do not have a desktop display.
+    detector_env["SURAKSHAN_HEADLESS"] = "0" if os.name == "nt" else "1"
 
     if payload.source == "bundled-video":
         bundled_video = PROJECT_ROOT / "Accident_Detection.mp4"
