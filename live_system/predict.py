@@ -39,6 +39,8 @@ if not MODEL_PATH.is_file():
 
 # Original Keras model settings
 IMAGE_SIZE = 128
+TRAIN_FRAME_SIZE = 224
+LETTERBOX_VALUE = 114
 ACCIDENT_INDEX = 0
 NON_ACCIDENT_INDEX = 1
 
@@ -56,7 +58,7 @@ def _load_default_threshold():
                 return value
         except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
             print(f"[SURAKSHAN] Could not read model threshold metadata: {error}", flush=True)
-    return 0.93
+    return 0.85
 
 
 ACCIDENT_THRESHOLD = float(
@@ -126,12 +128,35 @@ print(f"[SURAKSHAN] Keras CNN loaded: {MODEL_PATH}", flush=True)
 
 
 def _preprocess_frame(frame_bgr):
-    """Apply the same preprocessing used by the original Keras model."""
+    """Match training: letterbox to 224, grayscale, resize to 128, normalize."""
 
+    height, width = frame_bgr.shape[:2]
+    if height <= 0 or width <= 0:
+        raise ValueError("Received an empty camera frame")
+    scale = min(TRAIN_FRAME_SIZE / width, TRAIN_FRAME_SIZE / height)
+    out_w = max(1, min(TRAIN_FRAME_SIZE, round(width * scale)))
+    out_h = max(1, min(TRAIN_FRAME_SIZE, round(height * scale)))
+    resized_frame = cv2.resize(
+        frame_bgr, (out_w, out_h), interpolation=cv2.INTER_AREA
+    )
     if frame_bgr.ndim == 2:
-        gray = frame_bgr
+        letterboxed = np.full(
+            (TRAIN_FRAME_SIZE, TRAIN_FRAME_SIZE), LETTERBOX_VALUE, dtype=np.uint8
+        )
     else:
-        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+        letterboxed = np.full(
+            (TRAIN_FRAME_SIZE, TRAIN_FRAME_SIZE, 3),
+            LETTERBOX_VALUE,
+            dtype=np.uint8,
+        )
+    x = (TRAIN_FRAME_SIZE - out_w) // 2
+    y = (TRAIN_FRAME_SIZE - out_h) // 2
+    letterboxed[y:y + out_h, x:x + out_w] = resized_frame
+
+    if letterboxed.ndim == 2:
+        gray = letterboxed
+    else:
+        gray = cv2.cvtColor(letterboxed, cv2.COLOR_BGR2GRAY)
 
     resized = cv2.resize(
         gray,

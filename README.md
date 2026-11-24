@@ -82,7 +82,7 @@ Outputs:
 - `results/keras/test_metrics.json`: held-out test metrics.
 - `results/keras/model_metadata.json`: copy of model metadata.
 
-The predictor reads the threshold from the metadata next to the weights. Set `SURAKSHAN_ACCIDENT_THRESHOLD` to override it explicitly. If metadata is absent or invalid, inference falls back to 0.93. Do not report test metrics until a complete training run has produced them.
+The predictor reads the threshold from the metadata next to the weights. Set `SURAKSHAN_ACCIDENT_THRESHOLD` to override it explicitly. If metadata is absent or invalid, inference falls back to 0.85, selected for the best balanced accuracy among the available validation window thresholds. The model's validation and held-out test performance remains limited; this threshold does not establish production reliability.
 
 ## Run the API
 
@@ -135,7 +135,7 @@ uvicorn live_system.server:app --host 127.0.0.1 --port 5000
 
 Use `0` for the default webcam or provide an accessible camera stream URL. The detector runs on the API host, not inside the browser. Logs are written to `logs/detector.log`.
 
-The predictor requires consecutive positive frame predictions. The incident gate applies an additional temporal rule before an incident is recorded. This can add detection delay; evaluate both false alerts and time-to-detection on representative footage before changing these settings.
+The predictor samples every 0.5 seconds by default and requires 3 consecutive positive predictions. The incident gate then requires 6 positives in a 10-sample window before an incident is recorded. This keeps the existing temporal protection; false alerts remain possible.
 
 ## Incident workflow
 
