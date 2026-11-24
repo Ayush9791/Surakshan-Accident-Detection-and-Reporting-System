@@ -94,6 +94,11 @@ def main():
                                confidence=details["accident_probability"],
                                image_path=evidence_path,
                                incident_timestamp=details.get("incident_timestamp"))
+
+                # Keep the main loop paced with the file reader so it does not
+                # repeatedly record the same decoded frame at maximum CPU speed.
+                if SOURCE_MODE in {"bundled-video", "video-file"}:
+                    time.sleep(stream.frame_interval)
     finally:
         for stream in streams.values():
             stream.stop()
