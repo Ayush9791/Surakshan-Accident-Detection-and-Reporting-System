@@ -503,6 +503,8 @@ def detector_start(payload: DetectorStartPayload, user: dict = Depends(require_r
         return {"running": True, "message": "Detector is already running"}
     detector_env = os.environ.copy()
     detector_env["SURAKSHAN_CAMERA_SOURCE"] = payload.source
+    # Render has no display server; the detector must process frames without cv2.imshow().
+    detector_env["SURAKSHAN_HEADLESS"] = "1"
 
     if payload.source == "ip-webcam":
         camera_url = payload.camera_url.strip()
