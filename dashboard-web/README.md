@@ -54,13 +54,13 @@ Vercel hosts the dashboard only. Continuous CCTV capture and OpenCV inference re
 - Traffic authority: incident review/status updates, assignment, detector controls and simulated dispatch.
 - Hospital: only verified/resolved incidents assigned to its organisation.
 - Incident records, assignments, users and simulated dispatches persist in SQLite.
-- Browser webcam preview is only a preview. **Start AI detector** launches `python -m live_system.advanced_live` on the same host as the API.
-- The detector defaults to `http://10.63.101.159:8080/video`. Start the phone's IP Webcam server and confirm that URL opens from the laptop. You can override the default with `SURAKSHAN_CAMERA_URL` in the PowerShell session before starting the API:
-  ```powershell
-  $env:SURAKSHAN_CAMERA_URL = "http://10.63.101.159:8080/video"
-  uvicorn live_system.server:app --host 127.0.0.1 --port 5000
-  ```
-  Use HTTP and include `/video`; confirm the stream opens from the laptop. Detector logs are written to `logs/detector.log`.
+- **Start AI detector** launches `python -m live_system.advanced_live` on the same machine as the Python API, using the selected input.
+- Camera inputs in the dashboard:
+  - **PC Webcam:** opens camera index 0 on the API host.
+  - **Android IP Webcam:** enter the phone's reachable MJPEG URL, normally ending in `/video`, for example `http://192.168.1.105:8080/video`.
+  - **Video file:** enter the absolute path of a video file stored on the API host.
+- The browser preview is only a preview. It does not send browser camera frames to the AI detector.
+- A Vercel dashboard cannot make a cloud-hosted Python API access your laptop's webcam or local files. Run the Python API locally on the laptop for PC Webcam/video-file input, or use a stream reachable from the API host. Detector logs are written to `logs/detector.log`.
 - Demo incident creation uses an authenticated operator endpoint. Hospital assignment and simulated dispatch are available only after an incident is verified.
 - Simulated dispatch only records a local notification. It never contacts real authorities.
 
