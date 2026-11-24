@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, AlertTriangle, BellRing, Camera, CheckCircle2, CircleUserRound, ClipboardList, Hospital, LogOut, MapPin, RefreshCw, ShieldCheck, Siren, UserPlus, Video, XCircle } from "lucide-react";
 
 const API = (process.env.NEXT_PUBLIC_SURAKSHAN_API_URL || (process.env.NODE_ENV === "development" ? "http://127.0.0.1:5000" : "")).replace(/\/$/, "");
-const IP_CAMERA_STREAM = "http://10.63.101.159:8080/video";
 const STATUSES = ["New", "Under Review", "Verified", "Dismissed", "Resolved"];
 
 export default function Dashboard() {
@@ -23,6 +22,9 @@ export default function Dashboard() {
   const [busy, setBusy] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraError, setCameraError] = useState("");
+  const [cameraSource, setCameraSource] = useState("pc-camera");
+  const [ipCameraUrl, setIpCameraUrl] = useState("http://10.63.101.159:8080/video");
+  const [videoPath, setVideoPath] = useState("");
   const [newUser, setNewUser] = useState({ username: "", password: "", role: "hospital", organization: "" });
   const [assignOrg, setAssignOrg] = useState("");
   const [apiOnline, setApiOnline] = useState(false);
@@ -242,7 +244,15 @@ export default function Dashboard() {
   async function detectorAction(action) {
     setBusy(true);
     try {
-      const response = await authFetch(`/detector/${action}`, { method: "POST" });
+      const options = { method: "POST" };
+      if (action === "start") {
+        options.body = JSON.stringify({
+          source: cameraSource,
+          camera_url: ipCameraUrl,
+          video_path: videoPath,
+        });
+      }
+      const response = await authFetch(`/detector/${action}`, options);
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || "Detector action failed");
       setDetectorRunning(Boolean(payload.running));
@@ -324,21 +334,35 @@ export default function Dashboard() {
         <div className="lower-grid">
           <section className="panel camera-panel" id="camera">
             <div className="panel-heading">
-              <div><h2>IP camera preview</h2><p>Android IP Webcam · {IP_CAMERA_STREAM}</p></div>
-              <span className="stream-pill"><span className={cameraOn ? "live-dot" : "offline-dot"}/>{cameraOn ? "PREVIEW LIVE" : "STOPPED"}</span>
+              <div><h2>Camera and video input</h2><p>Select the source used by the existing AI detector.</p></div>
+              <span className="stream-pill"><span className={detectorRunning ? "live-dot" : "offline-dot"}/>{detectorRunning ? "DETECTOR RUNNING" : "DETECTOR STOPPED"}</span>
             </div>
             <div className="camera-preview">
-              {cameraOn ? <img src={IP_CAMERA_STREAM} alt="Live IP camera stream" className="webcam-video visible" onError={() => { setCameraError("Could not load the IP stream. Check the phone's server and address."); setCameraOn(false); }}/> : <div className="camera-placeholder"><Camera size={28}/><strong>IP camera preview stopped</strong><span>Start the preview to connect to the phone.</span></div>}
+              {cameraOn && cameraSource === "ip-webcam"
+                ? <img src={ipCameraUrl} alt="Live Android IP Webcam stream" className="webcam-video visible" onError={() => { setCameraError("Could not load the IP stream. Check the phone's server, URL, and network."); setCameraOn(false); }}/>
+                : <div className="camera-placeholder"><Camera size={28}/><strong>{cameraOn ? "Preview is not available for this input" : "Camera preview stopped"}</strong><span>Preview is separate from the AI detector input.</span></div>}
             </div>
             {cameraError && <p className="error-text">{cameraError}</p>}
-            <div className="camera-controls">
-              <div><span className={detectorRunning ? "live-dot" : "offline-dot"}/>{detectorRunning ? "Python detector running on API host" : "Python detector stopped"}</div>
+            <div className="camera-controls" style={{display:"grid",gap:"12px",alignItems:"stretch"}}>
+              <label className="field-label">Detection input
+                <select value={cameraSource} disabled={detectorRunning || busy} onChange={event => { setCameraSource(event.target.value); setCameraOn(false); setCameraError(""); }}>
+                  <option value="pc-camera">PC Webcam (camera 0)</option>
+                  <option value="ip-webcam">Android IP Webcam</option>
+                  <option value="video-file">Video file on detector PC</option>
+                </select>
+              </label>
+              {cameraSource === "ip-webcam" && <label className="field-label">IP Webcam stream URL
+                <input value={ipCameraUrl} onChange={event => setIpCameraUrl(event.target.value)} placeholder="http://192.168.1.105:8080/video" disabled={detectorRunning || busy}/>
+              </label>}
+              {cameraSource === "video-file" && <label className="field-label">Video file path on detector PC
+                <input value={videoPath} onChange={event => setVideoPath(event.target.value)} placeholder="C:\\Surakshan\\videos\\traffic.mp4" disabled={detectorRunning || busy}/>
+              </label>}
               <div className="camera-control-buttons">
-                <button className={cameraOn ? "button button-secondary" : "button button-quiet"} onClick={toggleCamera}>{cameraOn ? "Stop IP preview" : "Preview IP camera"}</button>
-                {user.role !== "hospital" && <button className={detectorRunning ? "button button-secondary" : "button button-primary"} disabled={busy || cameraOn} onClick={() => detectorAction(detectorRunning ? "stop" : "start")}>{detectorRunning ? "Stop AI detector" : "Start AI detector"}</button>}
+                {cameraSource === "ip-webcam" && <button className="button button-quiet" disabled={detectorRunning || busy} onClick={() => { setCameraError(""); setCameraOn(value => !value); }}>{cameraOn ? "Stop preview" : "Preview IP camera"}</button>}
+                {user.role !== "hospital" && <button className={detectorRunning ? "button button-secondary" : "button button-primary"} disabled={busy} onClick={() => detectorAction(detectorRunning ? "stop" : "start")}>{detectorRunning ? "Stop AI detector" : "Start AI detector"}</button>}
               </div>
             </div>
-            <p className="camera-disclaimer">The browser preview connects directly to the phone. A cloud API host cannot reach this private tether address; run the detector on the PC connected to the phone and send alerts to the hosted API.</p>
+            <p className="camera-disclaimer">The selected input is opened by the machine running the Python API. PC Webcam and video-file input work when the API runs on your PC. For a cloud-hosted API, use a camera stream reachable by that server. The browser preview does not feed frames into AI inference.</p>
           </section>          {user.role !== "hospital" && <section className="panel dispatch-panel" id="dispatch"><div className="panel-heading"><div><h2>Simulated dispatch log</h2><p>No external notifications are sent</p></div><span className="panel-pill">{dispatches.length} EVENTS</span></div><div className="dispatch-list">{dispatches.length === 0 ? <div className="empty-state compact"><BellRing size={22}/><strong>No simulated dispatches</strong><span>Select an incident and use Simulate dispatch.</span></div> : dispatches.slice(0,8).map(item => <div className="dispatch-row" key={item.notification_id}><span className="dispatch-icon"><BellRing size={15}/></span><div><strong>{item.destination}</strong><small>{item.incident_id} · {new Date(item.timestamp).toLocaleString()}</small></div><span className="simulated-tag">SIMULATED</span></div>)}</div><div className="dispatch-note"><ShieldCheck size={15}/>Simulated records only; no authority has been contacted.</div></section>}
         </div>
         {user.role === "admin" && <div className="admin-grid" id="accounts">
