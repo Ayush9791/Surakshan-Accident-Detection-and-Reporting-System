@@ -1,30 +1,30 @@
 # Local training data
 
-The ResNet-18 pipeline reads original videos from the ignored `vid_dataset/` directory and writes newly sampled images and manifests to the ignored `dataset/resnet18_frames/` directory. Source videos and pre-existing images are preserved.
+The active Keras training pipeline reads source videos from the ignored `vid_dataset/` directory and writes sampled frames plus manifests to `dataset/resnet18_frames/`. The output directory retains its historical name to preserve existing local data; it is not tied to the ResNet18 architecture.
 
 ## Audited video sources
 
-- `vid_dataset/archive (1)/`: 981 videos with ACCIDENT event-time metadata. The trainer samples positive frames around each annotated event and may use pre-event frames as negatives only when they end at least two seconds before the annotated event.
-- `vid_dataset/TAD-benchmark/`: 127 normal videos are used as genuine negative footage. Its 277 accident videos do not provide event timestamps, so they are excluded from frame-level supervision.
-- `vid_dataset/traffic_eval_ccby/`: six reviewed normal time ranges are included in training only. Three videos without reviewed ranges are excluded.
+- `vid_dataset/archive (1)/`: 981 videos with ACCIDENT event-time metadata. Accident frames are sampled around the annotated event. Pre-event frames are used as negatives only when they end at least two seconds before the annotated event.
+- `vid_dataset/TAD-benchmark/`: 127 normal videos are used as negative footage. Its 277 accident videos do not provide event timestamps and are excluded from frame-level supervision.
+- `vid_dataset/traffic_eval_ccby/`: six reviewed normal traffic ranges are included in training only. Three videos without reviewed ranges are excluded.
 - `vid_dataset/Accident-Bench/`: 29 air-space question-answer videos are not binary road-accident data and are excluded.
-- `vid_dataset/TAD/`: empty.
+- `vid_dataset/TAD/`: empty in the audited collection.
 
-The full audit inspected 1,423 videos (7.661 GiB). It found no exact duplicate videos, 17 near-duplicate candidates retained for review, and seven videos with a failed sampled read near the end. Frame-level extraction failures and quality filters are recorded in `dataset/resnet18_frames/skipped_frames.csv`; excluded videos and reasons are recorded in `dataset/resnet18_frames/preprocessing_exclusions.csv`.
+The previous audit inspected 1,423 videos (7.661 GiB), found no exact duplicate videos, flagged 17 near-duplicate candidates for review, and found seven videos with a failed sampled read near the end. These are historical audit results, not a claim that the current local files have been re-audited.
 
-## Preserved legacy images
+## Preserved older image folders
 
-The existing `dataset/train/`, `dataset/val/`, and `dataset/test/` contain 7,578 valid images. They remain untouched and are not used by the new training run: mapping their clip hashes back to source metadata found 11 original-video groups represented across multiple splits. The older `dataset/rebuilt_video/` output is also preserved; the new model uses only the newly generated `dataset/resnet18_frames/` manifest.
+The existing `dataset/train/`, `dataset/val/`, and `dataset/test/` contain 7,578 valid images. They were kept separate because mapping their clip hashes to source metadata found 11 original-video groups represented across multiple splits. The older `dataset/rebuilt_video/` output is also preserved. The active training script reads only the `frames_manifest.csv` under the configured dataset root.
 
 ## Prepare and train
 
-From the repository root in PowerShell:
+Run in PowerShell from the repository root:
 
 ```powershell
 .\.venv\Scripts\python.exe preprocess_video_dataset.py --workers 8
 .\.venv\Scripts\python.exe train.py
 ```
 
-The preprocessor splits source groups before sampling frames. It keeps TAD's official test videos in the test split, uses a fixed seed, samples at 2 FPS, letterboxes to 224×224, filters unusable and near-duplicate frames, and saves an audit manifest. The ResNet-18 trainer uses class- and source-group-balanced sampling, tunes the decision threshold on validation, and evaluates the held-out test split only after model selection.
+The preprocessor uses source-group-aware splits, retains TAD's official test assignment, samples and filters frames, and writes an audit manifest. The Keras trainer uses 128×128 grayscale inputs, class/source-group-balanced sample weights, validation-selected thresholding, and a held-out test evaluation after model selection.
 
-The first training run downloads ImageNet ResNet-18 weights from TorchVision if they are not already cached. It does not load the legacy `surakshan_model.pth` checkpoint.
+The current configuration is `configs/keras_training.json`. The old ResNet18 and experimental temporal-model configurations are no longer part of the active pipeline.
