@@ -17,12 +17,27 @@ from live_system.predict import predict_frame_details, reset_predictor
 from live_system.recorder import Recorder
 
 
-# Default to the configured IP Webcam; the environment variable can override it.
-CAMERA_SOURCES = {
-    "Camera 1": normalize_camera_source(
-        os.environ.get("SURAKSHAN_CAMERA_URL", "http://10.63.101.159:8080/video")
-    ),
-}
+# The API passes the selected source through environment variables.
+# All inputs use the same existing frame predictor and model weights.
+SOURCE_MODE = os.environ.get("SURAKSHAN_CAMERA_SOURCE", "ip-webcam").strip().lower()
+
+if SOURCE_MODE == "pc-camera":
+    CAMERA_SOURCES = {"PC Webcam": 0}
+elif SOURCE_MODE == "video-file":
+    VIDEO_PATH = os.environ.get("SURAKSHAN_VIDEO_PATH", "").strip()
+    if not VIDEO_PATH:
+        raise RuntimeError("SURAKSHAN_VIDEO_PATH is required for video-file input.")
+    CAMERA_SOURCES = {"Video File": normalize_camera_source(VIDEO_PATH)}
+elif SOURCE_MODE == "ip-webcam":
+    CAMERA_SOURCES = {
+        "IP Webcam": normalize_camera_source(
+            os.environ.get("SURAKSHAN_CAMERA_URL", "http://10.63.101.159:8080/video")
+        ),
+    }
+else:
+    raise RuntimeError(
+        "Unsupported camera source. Choose pc-camera, ip-webcam, or video-file."
+    )
 
 
 def main():
@@ -40,8 +55,7 @@ def main():
             if not stream.wait_until_ready(timeout=8.0):
                 raise RuntimeError(
                     f"Camera source {source!r} opened but no video frames arrived. "
-                    "For IP Webcam, use http://10.63.101.159:8080/video, keep the app's "
-                    "server running, and confirm the URL works from this computer."
+                    "Check that the selected webcam, video file, or IP Webcam stream is accessible."
                 )
             recorders[cam_id] = Recorder()
             gates[cam_id] = IncidentGate()
