@@ -748,20 +748,32 @@ def prepare_video_dataset(config, config_path, project_root=PROJECT_ROOT, worker
 
     output_root.mkdir(parents=True, exist_ok=True)
     results_root.mkdir(parents=True, exist_ok=True)
+    # The config filename is not part of the data-generation settings.
+    # Accept the previous ResNet-named config hash so existing extracted frames
+    # remain reusable after the Keras config rename.
     run_config = {
         "preprocessing": prep,
         "splits": split_config,
-        "config_path": str(config_path),
     }
     config_hash = hashlib.sha256(json.dumps(run_config, sort_keys=True).encode()).hexdigest()
     run_config_file = output_root / "preprocessing_config.json"
     if run_config_file.exists():
         previous = json.loads(run_config_file.read_text(encoding="utf-8"))
-        if previous.get("config_hash") != config_hash:
+        previous_hash = previous.get("config_hash")
+        legacy_run_config = {
+            **run_config,
+            "config_path": str((project_root / "configs" / "resnet18_training.json").resolve()),
+        }
+        legacy_hash = hashlib.sha256(
+            json.dumps(legacy_run_config, sort_keys=True).encode()
+        ).hexdigest()
+        if previous_hash not in {config_hash, legacy_hash}:
             raise RuntimeError(
                 f"{output_root} already contains a different preprocessing run. "
                 "Choose a new dataset_root in the config to preserve it."
             )
+        if previous_hash == legacy_hash:
+            _write_json(run_config_file, {**run_config, "config_hash": config_hash})
     else:
         _write_json(run_config_file, {**run_config, "config_hash": config_hash})
 
