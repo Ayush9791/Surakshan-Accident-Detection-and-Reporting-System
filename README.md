@@ -1,27 +1,30 @@
-# Surakshan — Traffic Incident Detection and Response Platform
+# Surakshan: CCTV Accident Detection and Incident Response
 
-Surakshan is a college-project prototype that combines webcam-based accident classification, incident persistence, role-based web dashboards, hospital assignment, audit logging, and simulated emergency notifications. Its current training baseline is an ImageNet-pretrained ResNet-18 frame classifier. Live inference samples camera frames and requires three consecutive above-threshold predictions before creating an incident.
+Surakshan is an academic prototype for CCTV accident screening and incident handling. It combines a Keras frame classifier, temporal alert gates, a FastAPI backend, SQLite persistence, and a Next.js operator dashboard with admin, traffic-authority, and hospital roles.
 
-> **Important:** this is not a certified emergency system. The AI can miss incidents or raise false alerts. Dispatch is simulated only; no police, ambulance, hospital, or emergency service is contacted. The API and demo accounts are not production-hardened. Do not expose the service publicly as-is.
+> **Safety notice:** This is not a certified emergency system. The classifier can miss accidents or generate false alerts. Human review is required. Dispatch is simulated and does not contact police, ambulance, hospitals, or other emergency services. Do not use this prototype as the sole basis for real-world emergency response.
 
-## Features in this branch
+## Current architecture
 
-- PyTorch frame-classification baseline and existing live webcam inference pipeline.
-- Temporal incident gate to avoid triggering on a single positive frame.
-- Incident event records in SQLite.
-- Next.js/React dashboard replacing Streamlit for the operator workflow.
-- Login for **admin**, **traffic authority**, and **hospital** roles.
-- Role-based permissions: admins create authority/hospital accounts; authorities review incidents, update status, assign verified cases to a hospital, and create simulated dispatch records; hospitals only see verified/resolved cases assigned to their own organisation.
-- Password hashing using PBKDF2-HMAC-SHA256, expiring signed sessions, password change, and an admin audit trail.
-- Dashboard buttons to start/stop the Python detector on the same host as the API.
-- Optional shared detector-ingestion token for a separately configured detector client.
-- Automated Python API tests and Next.js production build workflow.
+- **Model:** TensorFlow/Keras CNN binary frame classifier.
+- **Input:** 128 × 128 grayscale frames, float32 normalized to [0, 1].
+- **Class indices:** Accident = 0; Non_Accident = 1.
+- **Weights:** `models/keras/car_accident_model.weights.h5`.
+- **Training metadata:** `models/keras/model_metadata.json`, written after training. It contains the validation-selected threshold and model preprocessing details.
+- **Inference:** `live_system/predict.py`, shared by the live detector.
+- **Temporal alerting:** per-camera consecutive-positive logic in the predictor, followed by the incident gate in `live_system/incident.py`.
+- **Backend:** FastAPI with SQLite, role-based access, evidence-photo storage, audit events, and simulated dispatch.
+- **Frontend:** Next.js/React in `dashboard-web/`.
 
-## Free local setup (Windows PowerShell)
+The old PyTorch/ResNet18 trainer, old Streamlit dashboard, and experimental video-model code have been removed from the active source tree. The current classifier is still a frame-based CNN, not a temporal video model.
 
-No paid service, paid API key, or cloud account is required for the college demo. Install Python 3.10 or 3.11, Node.js 20 LTS, and Git.
+## Requirements
 
-From the repository root:
+- Python 3.10 or 3.11
+- Node.js 20 LTS
+- Git
+
+Install Python dependencies in PowerShell from the repository root:
 
 ```powershell
 py -3.10 -m venv .venv
@@ -30,11 +33,60 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-If Python 3.10 is not installed, use a version listed by `py -0p`, such as `py -3.11`.
+If Python 3.10 is unavailable, use Python 3.11.
 
-### Start the API
+### GPU note for Windows
 
-Open Terminal 1 in the repository root:
+The standard TensorFlow pip package on native Windows does not provide CUDA GPU support for modern TensorFlow versions. On native Windows, this setup may train on CPU even when an NVIDIA GPU is installed. For TensorFlow CUDA acceleration with an RTX GPU, use a supported WSL2/Linux environment with the NVIDIA WSL driver and a compatible TensorFlow installation. Always verify with:
+
+```python
+import tensorflow as tf
+print(tf.config.list_physical_devices("GPU"))
+```
+
+An empty list means TensorFlow will use CPU. Do not assume that selecting the RTX GPU in NVIDIA Control Panel makes TensorFlow use it.
+
+## Prepare the video dataset
+
+Place the source video collections under `vid_dataset/` using the expected folder structure and metadata files described in `dataset/README.md`.
+
+Run from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe preprocess_video_dataset.py --workers 8
+```
+
+The preprocessor reads `configs/keras_training.json`, audits source videos, assigns source groups to splits, and writes the extracted frame dataset and manifests under `dataset/resnet18_frames/`. That directory name is retained to avoid invalidating an existing local extraction; the frames are not ResNet-specific.
+
+Do not randomly split individual frames. The source-video grouping in the manifest is required to prevent adjacent frames from the same source appearing in multiple splits.
+
+## Train the Keras classifier
+
+```powershell
+.\.venv\Scripts\python.exe train.py
+```
+
+Optional overrides:
+
+```powershell
+.\.venv\Scripts\python.exe train.py --epochs 20 --batch-size 32
+```
+
+Training reads `frames_manifest.csv`, validates paths and split integrity, decodes frame paths before OpenCV preprocessing, and uses group/class-balanced sample weights. It aggregates frame probabilities by annotated sequence window for validation threshold selection and held-out test evaluation.
+
+Outputs:
+
+- `models/keras/car_accident_model.weights.h5`: best validation-selected weights.
+- `models/keras/model_metadata.json`: model details and validation-selected accident threshold used by live inference.
+- `results/keras/training_history.json`: epoch history.
+- `results/keras/test_metrics.json`: held-out test metrics.
+- `results/keras/model_metadata.json`: copy of model metadata.
+
+The predictor reads the threshold from the metadata next to the weights. Set `SURAKSHAN_ACCIDENT_THRESHOLD` to override it explicitly. If metadata is absent or invalid, inference falls back to 0.93. Do not report test metrics until a complete training run has produced them.
+
+## Run the API
+
+Terminal 1:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
@@ -43,11 +95,11 @@ uvicorn live_system.server:app --host 127.0.0.1 --port 5000
 
 API documentation: http://127.0.0.1:5000/docs
 
-The SQLite database is created automatically at `data/surakshan.db`. Do not delete it while the API is running.
+The database is created at `data/surakshan.db`. Do not delete it while the API is running.
 
-### Start the web dashboard
+## Run the web dashboard
 
-Open Terminal 2:
+Terminal 2:
 
 ```powershell
 cd dashboard-web
@@ -56,11 +108,11 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000. Keep both terminals running.
+Open http://localhost:3000. Keep both the API and frontend running.
 
-### Demo logins
+## Demo accounts
 
-These accounts are created automatically the first time the database starts, unless matching usernames already exist.
+The API seeds these accounts on a fresh database:
 
 | Role | Username | Demo password |
 |---|---|---|
@@ -68,105 +120,55 @@ These accounts are created automatically the first time the database starts, unl
 | Traffic authority | `authority` | `Authority@12345` |
 | Hospital | `hospital` | `Hospital@12345` |
 
-Change each password after logging in. The admin can create additional hospital and authority accounts in **Account management**. Hospital access is limited to verified/resolved incidents assigned to that hospital organisation. To assign a case, use the exact organisation name shown in the admin account list (the seeded hospital is `Demo General Hospital`).
+Change demo passwords before sharing the application. Set `SURAKSHAN_ADMIN_PASSWORD`, `SURAKSHAN_AUTHORITY_PASSWORD`, and `SURAKSHAN_HOSPITAL_PASSWORD` before the database is initialized to use different initial passwords. Set a stable, random `SURAKSHAN_AUTH_SECRET` for shared deployments. Existing accounts are not reset when environment variables change.
 
-To use different seeded passwords on a fresh database, set `SURAKSHAN_ADMIN_PASSWORD`, `SURAKSHAN_AUTHORITY_PASSWORD`, and `SURAKSHAN_HOSPITAL_PASSWORD` before first starting the API. Existing accounts are not reset when these variables change. Set `SURAKSHAN_AUTH_SECRET` to a long random value before sharing the app. Without it, the API generates a temporary random secret at startup, so existing sessions will need to sign in again after an API restart.
+## Run live camera inference
 
-### Test the end-to-end workflow
+The dashboard can start the detector process on the same machine that runs the API. The detector uses the configured local camera or stream source. The default is the Android IP Webcam URL currently configured in `live_system/advanced_live.py`.
 
-1. Sign in as `admin`.
-2. Click **Create test incident**.
-3. Select the new incident, verify it, and assign it to `Demo General Hospital`.
-4. Click **Simulate dispatch** and verify the notification appears in the dispatch log.
-5. Sign out and sign in as `hospital`. The verified incident should appear in the hospital queue.
-6. Use **Account management** to create additional authority/hospital users.
-7. Use **Start AI detector** to launch the Python inference process on the computer running the API. It opens an OpenCV window and writes logs to `logs/detector.log`. Stop the browser preview before starting the Python detector.
-8. By default, the detector uses your Android IP Webcam stream at `http://10.63.101.159:8080/video`. Start the phone's server and confirm that URL opens from the laptop. You can override it by setting `SURAKSHAN_CAMERA_URL` in the same PowerShell session before starting the API:
-   ```powershell
-   $env:SURAKSHAN_CAMERA_URL = "http://10.63.101.159:8080/video"
-   uvicorn live_system.server:app --host 127.0.0.1 --port 5000
-   ```
-   Use `http`, not `https`, and include `/video`. Keep both devices on a network that permits device-to-device traffic. The API's detector subprocess inherits this setting. If the stream opens but has no frames, check `logs/detector.log`.
-9. When a positive event passes the existing incident gate, the detector submits an incident to the API. Review it in the dashboard. Model output remains a potential incident until a human verifies it.
-
-## Roles and permissions
-
-- **Admin:** view all incidents; manage authority/hospital accounts; change incident status; assign incidents; view audit events; start/stop local detector; create simulated dispatch records.
-- **Traffic authority:** view incident queue; review/verify/dismiss/resolve; assign verified cases to hospitals; start/stop local detector; record simulated dispatch.
-- **Hospital:** view only verified/resolved incidents assigned to its own organisation; no global incident access or dispatch privileges.
-
-The current detector ingestion endpoint `POST /alert` is intended for the local detector. For a trusted network or cloud deployment, set `SURAKSHAN_DETECTOR_TOKEN` and configure the same environment variable for the detector process; the API rejects detector alerts without the matching `X-Detector-Token`. Do not expose the API publicly without HTTPS, firewalling, rate limiting, secret management, and additional security review.
-
-## Run automated tests
+Override it in the same PowerShell session used to start the API:
 
 ```powershell
-python -m unittest discover -s tests -v
+$env:SURAKSHAN_CAMERA_URL = "0"
+uvicorn live_system.server:app --host 127.0.0.1 --port 5000
 ```
 
-Build the frontend locally:
+Use `0` for the default webcam or provide an accessible camera stream URL. The detector runs on the API host, not inside the browser. Logs are written to `logs/detector.log`.
+
+The predictor requires consecutive positive frame predictions. The incident gate applies an additional temporal rule before an incident is recorded. This can add detection delay; evaluate both false alerts and time-to-detection on representative footage before changing these settings.
+
+## Incident workflow
+
+1. The detector submits a potential incident and optional JPEG evidence.
+2. The incident appears in the operator queue as unverified.
+3. An admin or traffic authority reviews the incident.
+4. A verified incident can be assigned to a hospital.
+5. Dispatch records are simulated and visible in the dashboard. No external emergency service is contacted.
+
+Evidence photos are stored under `evidence/` by default. Local filesystem storage can be lost on ephemeral cloud hosting. Use persistent storage or object storage if evidence must survive restarts and deployments. Photos are review aids, not forensic-grade evidence.
+
+## Tests and frontend build
+
+Python tests:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Frontend build:
 
 ```powershell
 cd dashboard-web
 npm run build
 ```
 
-## Training the accident classifier
+## Known limitations
 
-The training pipeline uses videos under `vid_dataset/` as source material and extracts filtered 224×224 frames into `dataset/resnet18_frames/`. Original videos and the existing image folders are left in place. Splits are assigned by source-video group before frame extraction.
-
-The audited video set contains 981 accident videos with annotated event times, 127 TAD normal videos, and 6 reviewed normal traffic ranges. It excludes 277 TAD accident videos that have no event timestamps, 29 videos from the unrelated air-space question-answer benchmark, and 3 traffic videos without reviewed normal ranges. Accident clips contribute positive samples around their annotated event time; pre-event negatives are sampled only before the annotated time with a two-second safety margin. The existing legacy image folders are not used because 11 source-video groups cross their saved splits.
-
-Run these commands in PowerShell from the repository root:
-
-```powershell
-.\.venv\Scripts\python.exe preprocess_video_dataset.py --workers 8
-.\.venv\Scripts\python.exe train.py
-```
-
-Training uses a fresh ImageNet-pretrained ResNet-18, automatically selects CUDA when available, freezes the backbone for two epochs, then fine-tunes the final residual block. Class- and source-group-balanced sampling addresses the class imbalance. The validation split selects the checkpoint and accident threshold; the test split is evaluated once afterward. The best checkpoint is saved at `models/resnet18/resnet18_best.pth`; the training report and confusion matrix are saved under `results/resnet18/`.
-
-The first training run needs Internet access to download TorchVision's ImageNet ResNet-18 weights from `download.pytorch.org`. It fails clearly instead of silently training from random weights if those weights are unavailable. No fresh-model test metrics are available until that training run completes.
-
-To run the camera detector after training, use:
-
-```powershell
-.\.venv\Scripts\python.exe -m live_system.advanced_live
-```
-
-The predictor loads only `models/resnet18/resnet18_best.pth`, uses the validation-tuned threshold by default, and accepts `SURAKSHAN_ACCIDENT_THRESHOLD` and `SURAKSHAN_ALERT_CONSECUTIVE` environment overrides. Potential incidents include the prediction timestamp and an evidence JPEG in the existing FastAPI alert flow.
-
-## Zero-cost deployment guidance
-
-For the submission deadline, **run the full demo locally**. This is the most reliable option and costs nothing. The Python detector uses the camera attached to the machine running the API; a cloud server cannot access your laptop webcam just because the browser has a preview.
-
-Optional free-tier hosting can be explored later, but providers change limits, may sleep or require billing details, and the detector still needs a reachable authorised video source. Do not make a public deployment a deadline dependency. A free cloud host is not a substitute for securing the API.
-
-## Current limitations
-
-- The temporal model remains weak on unseen surveillance footage and can miss crashes or raise false alerts.
-- The browser webcam preview is only a preview. AI inference runs in the Python detector process on the API host.
-- The detector's OpenCV window is local to the API host; it is not streamed into the web dashboard.
-- The dashboard evidence panel does not yet play saved incident clips.
-- Simulated dispatch does not contact real authorities.
-- This prototype has no production-grade HTTPS deployment, multi-factor authentication, formal password reset, or agency integration.
-
-
-## Incident evidence photos and manual review
-
-When the temporal gate opens a potential accident, the detector saves the annotated trigger frame as a JPEG in the local `evidence/` folder, then includes that image with the alert sent to the API. The API stores the image, associates it with the incident record, and exposes it through the authenticated `/incidents/{incident_id}/evidence` endpoint. Operators can view the photo in **Incident details → Captured evidence** before marking the incident verified or dismissed. Existing incidents created before this change will show “No photo”; their original camera frames cannot be reconstructed.
-
-### Use a camera connected to your own Windows PC with the hosted dashboard
-
-A cloud host such as Render does not have access to your laptop's webcam. Run the Python detector on the PC physically connected to the webcam, and send incident alerts to the hosted API. From the repository root, in PowerShell:
-
-```powershell
-$env:SURAKSHAN_ALERT_URL = "https://surakshan-accident-detection-and.onrender.com/alert"
-$env:SURAKSHAN_CAMERA_URL = "0"
-# Only set this if SURAKSHAN_DETECTOR_TOKEN is configured on the hosted API:
-# $env:SURAKSHAN_DETECTOR_TOKEN = "the-same-token-configured-on-the-API"
-python -m live_system.advanced_live
-```
-
-Keep the detector process running while the camera is monitored. If the API has a detector token configured, set the same value in the local environment before launching it. New incidents and their photos should then appear in the hosted dashboard after the alert is accepted.
-
-**Storage note:** the default `evidence/` directory is local filesystem storage. On a free Render web service, files can be lost when the service is restarted or redeployed. Use a persistent disk or external object storage for evidence that must survive deployments. This prototype's stored photos are review aids, not forensic-grade evidence.
+- The model is a frame classifier and does not directly learn vehicle motion across a video clip.
+- Performance on unseen cameras, locations, weather, lighting, and unusual crash types is not established.
+- False alerts and missed accidents remain possible.
+- The browser camera preview is not the inference pipeline.
+- The detector's OpenCV window is local to the API host and is not streamed into the dashboard.
+- The evidence panel stores photos, not playable incident clips.
+- Dispatch is simulated only.
+- Production deployment still requires security hardening, HTTPS, secret management, retention controls, monitoring, and approved agency integrations.
