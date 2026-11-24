@@ -85,8 +85,8 @@ class SimulatedDispatchPayload(BaseModel):
     channel: str = Field(default="dashboard-demo", min_length=1, max_length=64)
 
 class DetectorStartPayload(BaseModel):
-    source: Literal["pc-camera", "ip-webcam", "video-file"] = "pc-camera"
-    camera_url: str = Field(default="http://10.63.101.159:8080/video", max_length=2048)
+    source: Literal["bundled-video", "pc-camera", "ip-webcam", "video-file"] = "bundled-video"
+    camera_url: str = Field(default="", max_length=2048)
     video_path: str = Field(default="", max_length=4096)
 
 
@@ -490,10 +490,35 @@ def list_simulated_dispatches(limit: int = Query(default=50, ge=1, le=200),
 
 
 
+@app.get("/detector/test-video")
+def detector_test_video():
+    """Serve the bundled public test clip for the dashboard preview."""
+    video_path = PROJECT_ROOT / "Accident_Detection.mp4"
+    if not video_path.is_file():
+        raise HTTPException(status_code=404, detail="Bundled accident test video is missing.")
+    return FileResponse(video_path, media_type="video/mp4", filename="Accident_Detection.mp4")
+
+
 @app.get("/detector/status")
 def detector_status(user: dict = Depends(require_roles("admin", "authority"))):
     running = DETECTOR_PROCESS is not None and DETECTOR_PROCESS.poll() is None
-    return {"running": running, "mode": "selectable-local-input", "note": "The selected camera or file must be accessible to the machine running this API."}
+    returncode = DETECTOR_PROCESS.poll() if DETECTOR_PROCESS is not None else None
+    try:
+        log_lines = DETECTOR_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
+        log_tail = log_lines[-25:]
+    except OSError:
+        log_tail = []
+    model_loaded = any("Keras CNN loaded:" in line for line in log_tail)
+    input_ready = any("Detector input ready:" in line for line in log_tail)
+    return {
+        "running": running,
+        "state": "running" if running else ("failed" if returncode not in (None, 0) else "stopped"),
+        "returncode": returncode,
+        "model_loaded": model_loaded,
+        "input_ready": input_ready,
+        "logs": log_tail,
+        "mode": "local-bundled-video",
+    }
 
 
 @app.post("/detector/start")
@@ -503,18 +528,20 @@ def detector_start(payload: DetectorStartPayload, user: dict = Depends(require_r
         return {"running": True, "message": "Detector is already running"}
     detector_env = os.environ.copy()
     detector_env["SURAKSHAN_CAMERA_SOURCE"] = payload.source
-    # Render has no display server; the detector must process frames without cv2.imshow().
     detector_env["SURAKSHAN_HEADLESS"] = "1"
 
-    if payload.source == "ip-webcam":
+    if payload.source == "bundled-video":
+        bundled_video = PROJECT_ROOT / "Accident_Detection.mp4"
+        if not bundled_video.is_file():
+            raise HTTPException(status_code=404, detail="Bundled accident test video is missing from the API project.")
+        detector_env["SURAKSHAN_VIDEO_PATH"] = str(bundled_video)
+    elif payload.source == "ip-webcam":
         camera_url = payload.camera_url.strip()
         if not camera_url.startswith(("http://", "https://")):
             raise HTTPException(status_code=422, detail="IP Webcam URL must start with http:// or https://.")
         detector_env["SURAKSHAN_CAMERA_URL"] = camera_url
     elif payload.source == "video-file":
-        # Use the bundled repository-root clip when the dashboard leaves the path blank.
-        requested_path = payload.video_path.strip() or "Accident_Detection.mp4"
-        video_path = Path(requested_path).expanduser()
+        video_path = Path(payload.video_path).expanduser()
         if not video_path.is_absolute():
             video_path = (PROJECT_ROOT / video_path).resolve()
         else:
@@ -538,7 +565,11 @@ def detector_start(payload: DetectorStartPayload, user: dict = Depends(require_r
             db.commit()
         finally:
             db.close()
-        return {"running": True, "pid": DETECTOR_PROCESS.pid, "message": f"Detector started using {payload.source} input"}
+        return {
+            "running": DETECTOR_PROCESS.poll() is None,
+            "pid": DETECTOR_PROCESS.pid,
+            "message": "Bundled accident video inference process launched. Use detector status to confirm model and input readiness.",
+        }
     except OSError as exc:
         if DETECTOR_LOG_HANDLE and not DETECTOR_LOG_HANDLE.closed:
             DETECTOR_LOG_HANDLE.close()

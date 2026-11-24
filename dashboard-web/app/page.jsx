@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, AlertTriangle, BellRing, Camera, CheckCircle2, CircleUserRound, ClipboardList, Hospital, LogOut, MapPin, RefreshCw, ShieldCheck, Siren, UserPlus, Video, XCircle } from "lucide-react";
+import { Activity, AlertTriangle, BellRing, CheckCircle2, CircleUserRound, ClipboardList, Hospital, LogOut, MapPin, RefreshCw, ShieldCheck, Siren, UserPlus, Video, XCircle } from "lucide-react";
 
 const API = (process.env.NEXT_PUBLIC_SURAKSHAN_API_URL || (process.env.NODE_ENV === "development" ? "http://127.0.0.1:5000" : "")).replace(/\/$/, "");
 const STATUSES = ["New", "Under Review", "Verified", "Dismissed", "Resolved"];
@@ -20,11 +20,8 @@ export default function Dashboard() {
   const [filter, setFilter] = useState("All");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const [cameraOn, setCameraOn] = useState(false);
-  const [cameraError, setCameraError] = useState("");
-  const [cameraSource, setCameraSource] = useState("video-file");
-  const [ipCameraUrl, setIpCameraUrl] = useState("http://10.63.101.159:8080/video");
-  const [videoPath, setVideoPath] = useState("Accident_Detection.mp4");
+  const [cameraSource, setCameraSource] = useState("bundled-video");
+  const [detectorDetails, setDetectorDetails] = useState({ model_loaded: false, input_ready: false, logs: [] });
   const [newUser, setNewUser] = useState({ username: "", password: "", role: "hospital", organization: "" });
   const [assignOrg, setAssignOrg] = useState("");
   const [apiOnline, setApiOnline] = useState(false);
@@ -61,7 +58,6 @@ export default function Dashboard() {
       const response = await authFetch("/incidents?limit=200", { cache: "no-store" });
       if (response.status === 401) {
         window.localStorage.removeItem("surakshan_token");
-        setCameraOn(false);
         setToken("");
         setUser(null);
         return;
@@ -71,7 +67,11 @@ export default function Dashboard() {
       setApiOnline(true);
       if (user.role !== "hospital") {
         const detectorResponse = await authFetch("/detector/status", { cache: "no-store" });
-        if (detectorResponse.ok) setDetectorRunning((await detectorResponse.json()).running);
+        if (detectorResponse.ok) {
+          const detectorPayload = await detectorResponse.json();
+          setDetectorRunning(Boolean(detectorPayload.running));
+          setDetectorDetails(detectorPayload);
+        }
       }
       if (user.role !== "hospital") {
         const dispatchResponse = await authFetch("/dispatch/notifications?limit=50", { cache: "no-store" });
@@ -131,9 +131,8 @@ export default function Dashboard() {
 
   function logout() {
     window.localStorage.removeItem("surakshan_token");
-    setCameraOn(false);
     setToken(""); setUser(null); setDemoMode(false); setApiOnline(false); setIncidents([]); setDispatches([]); setUsers([]); setAudit([]);
-    setSelectedId(""); setAssignOrg(""); setNotice(""); setCameraError("");
+    setSelectedId(""); setAssignOrg(""); setNotice("");
   }
 
   function enterOfflineDemo() {
@@ -246,24 +245,28 @@ export default function Dashboard() {
     try {
       const options = { method: "POST" };
       if (action === "start") {
-        options.body = JSON.stringify({
-          source: cameraSource,
-          camera_url: ipCameraUrl,
-          video_path: cameraSource === "video-file" ? "Accident_Detection.mp4" : videoPath,
-        });
+        options.body = JSON.stringify({ source: cameraSource });
       }
       const response = await authFetch(`/detector/${action}`, options);
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || "Detector action failed");
       setDetectorRunning(Boolean(payload.running));
       setNotice(payload.message || (payload.running ? "Detector started." : "Detector stopped."));
+      if (action === "start") {
+        window.setTimeout(async () => {
+          try {
+            const statusResponse = await authFetch("/detector/status", { cache: "no-store" });
+            if (statusResponse.ok) {
+              const statusPayload = await statusResponse.json();
+              setDetectorRunning(Boolean(statusPayload.running));
+              setDetectorDetails(statusPayload);
+              if (!statusPayload.running) setNotice(statusPayload.logs?.slice(-3).join(" | ") || "Detector exited. Check detector logs.");
+            }
+          } catch {}
+        }, 1500);
+      }
     } catch (error) { setNotice(error.message); }
     finally { setBusy(false); }
-  }
-
-  function toggleCamera() {
-    setCameraError("");
-    setCameraOn(value => !value);
   }
 
   if (!user) return <main className="login-shell">
@@ -334,31 +337,27 @@ export default function Dashboard() {
         <div className="lower-grid">
           <section className="panel camera-panel" id="camera">
             <div className="panel-heading">
-              <div><h2>Camera and video input</h2><p>Select the source used by the existing AI detector.</p></div>
-              <span className="stream-pill"><span className={detectorRunning ? "live-dot" : "offline-dot"}/>{detectorRunning ? "DETECTOR RUNNING" : "DETECTOR STOPPED"}</span>
+              <div><h2>AI video test</h2><p>Run the existing accident classifier against the bundled test clip.</p></div>
+              <span className="stream-pill"><span className={detectorRunning ? "live-dot" : "offline-dot"}/>{detectorRunning ? (detectorDetails.model_loaded && detectorDetails.input_ready ? "MODEL READY" : "DETECTOR STARTING") : "DETECTOR STOPPED"}</span>
             </div>
             <div className="camera-preview">
-              {cameraOn && cameraSource === "ip-webcam"
-                ? <img src={ipCameraUrl} alt="Live Android IP Webcam stream" className="webcam-video visible" onError={() => { setCameraError("Could not load the IP stream. Check the phone's server, URL, and network."); setCameraOn(false); }}/>
-                : <div className="camera-placeholder"><Camera size={28}/><strong>{cameraOn ? "Preview is not available for this input" : "Camera preview stopped"}</strong><span>Preview is separate from the AI detector input.</span></div>}
+              <video className="webcam-video visible" controls muted playsInline preload="metadata" src={API ? `${API}/detector/test-video` : ""}>
+                Your browser does not support HTML video.
+              </video>
             </div>
-            {cameraError && <p className="error-text">{cameraError}</p>}
             <div className="camera-controls" style={{display:"grid",gap:"12px",alignItems:"stretch"}}>
               <label className="field-label">Detection input
-                <select value={cameraSource} disabled={detectorRunning || busy} onChange={event => { setCameraSource(event.target.value); setCameraOn(false); setCameraError(""); }}>
+                <select value={cameraSource} disabled={detectorRunning || busy} onChange={event => setCameraSource(event.target.value)}>
+                  <option value="bundled-video">Bundled accident test video</option>
                   <option value="pc-camera">PC Webcam (camera 0)</option>
-                  <option value="ip-webcam">Android IP Webcam</option>
-                  <option value="video-file">Bundled accident test video</option>
                 </select>
               </label>
-
-              {cameraSource === "video-file" && <div className="inline-note">Using the bundled test clip: Accident_Detection.mp4</div>}
-              <div className="camera-control-buttons">
-                {cameraSource === "ip-webcam" && <button className="button button-quiet" disabled={detectorRunning || busy} onClick={() => { setCameraError(""); setCameraOn(value => !value); }}>{cameraOn ? "Stop preview" : "Preview IP camera"}</button>}
-                {user.role !== "hospital" && <button className={detectorRunning ? "button button-secondary" : "button button-primary"} disabled={busy} onClick={() => detectorAction(detectorRunning ? "stop" : "start")}>{detectorRunning ? "Stop AI detector" : "Start AI detector"}</button>}
-              </div>
+              {user.role !== "hospital" && <div className="camera-control-buttons">
+                <button className={detectorRunning ? "button button-secondary" : "button button-primary"} disabled={busy} onClick={() => detectorAction(detectorRunning ? "stop" : "start")}>{detectorRunning ? "Stop AI detector" : "Start AI detector"}</button>
+              </div>}
             </div>
-            <p className="camera-disclaimer">The selected input is opened by the machine running the Python API. PC Webcam and video-file input work when the API runs on your PC. For a cloud-hosted API, use a camera stream reachable by that server. The browser preview does not feed frames into AI inference.</p>
+            <p className="camera-disclaimer">The bundled clip is processed by the Python API host, not by the browser player. Run the API and dashboard locally to use your PC GPU. The status indicator reports whether the model and video input have loaded.</p>
+            {detectorDetails.logs?.length > 0 && <pre className="camera-disclaimer" style={{whiteSpace:"pre-wrap",maxHeight:180,overflow:"auto"}}>{detectorDetails.logs.slice(-8).join("\n")}</pre>}
           </section>          {user.role !== "hospital" && <section className="panel dispatch-panel" id="dispatch"><div className="panel-heading"><div><h2>Simulated dispatch log</h2><p>No external notifications are sent</p></div><span className="panel-pill">{dispatches.length} EVENTS</span></div><div className="dispatch-list">{dispatches.length === 0 ? <div className="empty-state compact"><BellRing size={22}/><strong>No simulated dispatches</strong><span>Select an incident and use Simulate dispatch.</span></div> : dispatches.slice(0,8).map(item => <div className="dispatch-row" key={item.notification_id}><span className="dispatch-icon"><BellRing size={15}/></span><div><strong>{item.destination}</strong><small>{item.incident_id} · {new Date(item.timestamp).toLocaleString()}</small></div><span className="simulated-tag">SIMULATED</span></div>)}</div><div className="dispatch-note"><ShieldCheck size={15}/>Simulated records only; no authority has been contacted.</div></section>}
         </div>
         {user.role === "admin" && <div className="admin-grid" id="accounts">

@@ -57,10 +57,10 @@ Vercel hosts the dashboard only. Continuous CCTV capture and OpenCV inference re
 - **Start AI detector** launches `python -m live_system.advanced_live` on the same machine as the Python API, using the selected input.
 - Camera inputs in the dashboard:
   - **PC Webcam:** opens camera index 0 on the API host.
-  - **Android IP Webcam:** enter the phone's reachable MJPEG URL, normally ending in `/video`, for example `http://192.168.1.105:8080/video`.
-  - **Video file:** enter the absolute path of a video file stored on the API host.
-- The browser preview is only a preview. It does not send browser camera frames to the AI detector.
-- A Vercel dashboard cannot make a cloud-hosted Python API access your laptop's webcam or local files. Run the Python API locally on the laptop for PC Webcam/video-file input, or use a stream reachable from the API host. Detector logs are written to `logs/detector.log`.
+  - **Bundled accident test video:** runs `Accident_Detection.mp4` through the existing model.
+  - **PC Webcam:** opens camera index 0 on the API host.
+- The browser video player is only a preview. The Python API separately reads the bundled clip for inference.
+- Run the Python API locally to use your laptop GPU. A Vercel frontend connected to Render runs inference on Render, not on your PC. Detector logs are written to `logs/detector.log`.
 - Demo incident creation uses an authenticated operator endpoint. Hospital assignment and simulated dispatch are available only after an incident is verified.
 - Simulated dispatch only records a local notification. It never contacts real authorities.
 
@@ -82,3 +82,23 @@ npm install
 npm run lint
 npm run build
 ```
+
+## Bundled accident video: local AI test
+
+The repository root contains `Accident_Detection.mp4`. Sign in with the local admin account, open **AI video test**, leave **Bundled accident test video** selected, and click **Start AI detector**. The Python API reads the clip and passes frames through the existing Keras model. The browser video player is only a preview; inference runs in the Python process.
+
+The local dashboard must call the local API. Ensure `dashboard-web/.env.local` contains:
+
+```env
+NEXT_PUBLIC_SURAKSHAN_API_URL=http://127.0.0.1:5000
+```
+
+After editing the environment file, restart `npm run dev`.
+
+Check TensorFlow GPU visibility in the same Python environment used to launch Uvicorn:
+
+```powershell
+python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+```
+
+An empty list means TensorFlow is not using a GPU in that environment. Enabling CUDA in Windows or NVIDIA Control Panel alone does not establish TensorFlow GPU support. A Vercel dashboard connected to Render runs inference on Render, not on your laptop GPU.

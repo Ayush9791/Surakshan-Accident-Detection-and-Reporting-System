@@ -1,6 +1,7 @@
 """Threaded OpenCV camera reader with safe frame snapshots."""
 import threading
 import time
+from pathlib import Path
 
 import cv2
 
@@ -16,6 +17,7 @@ def normalize_camera_source(value):
 class CameraStream:
     def __init__(self, source=0):
         self.source = source
+        self.is_file_source = isinstance(source, str) and Path(source).is_file()
         self.cap = cv2.VideoCapture(source)
         if not self.cap.isOpened():
             self.cap.release()
@@ -27,6 +29,8 @@ class CameraStream:
 
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
+        fps = self.cap.get(cv2.CAP_PROP_FPS) if self.is_file_source else 0.0
+        self.frame_interval = 1.0 / fps if fps and fps > 0 else 1.0 / 25.0
         self.ret, self.frame = self.cap.read()
         self._thread = threading.Thread(
             target=self._update, daemon=True, name="surakshan-camera"
@@ -43,7 +47,11 @@ class CameraStream:
                 else:
                     self.ret = False
             if not ret or frame is None:
+                if self.is_file_source:
+                    break
                 self._stop_event.wait(0.05)
+            elif self.is_file_source:
+                self._stop_event.wait(self.frame_interval)
 
     def wait_until_ready(self, timeout=8.0):
         """Wait briefly for the first decoded frame after the stream opens."""
