@@ -1,0 +1,43 @@
+{
+  "version": 2,
+  "paths": {
+    "video_root": "vid_dataset",
+    "dataset_root": "dataset/resnet18_frames",
+    "models_root": "models/keras",
+    "results_root": "results/keras"
+  },
+  "preprocessing": {
+    "sampling_fps": 2,
+    "image_size": 128,
+    "clip_frames": 1,
+    "sequence_seconds": 8,
+    "max_frames_per_video": 120,
+    "max_sequences_per_video": 15,
+    "min_laplacian_variance": 5,
+    "phash_duplicate_distance": 2,
+    "accident_pre_seconds": 2,
+    "accident_post_seconds": 2,
+    "normal_window_seconds": 2.4,
+    "normal_impact_margin_seconds": 2,
+    "seed": 42
+  },
+  "splits": {
+    "train": 0.7,
+    "val": 0.15,
+    "test": 0.15,
+    "preserve_tad_official_test": true,
+    "reviewed_traffic_split": "train"
+  },
+  "training": {
+    "model": "keras_cnn",
+    "batch_size": 32,
+    "epochs": 20,
+    "patience": 5,
+    "learning_rate": 0.0001,
+    "recall_target": 0.9
+  },
+  "inference": {
+    "sample_interval_seconds": 0.5,
+    "consecutive_positive_frames": 3
+  }
+}
