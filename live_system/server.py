@@ -504,12 +504,12 @@ def detector_status(user: dict = Depends(require_roles("admin", "authority"))):
     running = DETECTOR_PROCESS is not None and DETECTOR_PROCESS.poll() is None
     returncode = DETECTOR_PROCESS.poll() if DETECTOR_PROCESS is not None else None
     try:
-        log_lines = DETECTOR_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
-        log_tail = log_lines[-25:]
+        log_text = DETECTOR_LOG.read_text(encoding="utf-8", errors="replace")
+        log_tail = log_text.splitlines()[-25:]
     except OSError:
         log_tail = []
-    model_loaded = any("Keras CNN loaded:" in line for line in log_tail)
-    input_ready = any("Detector input ready:" in line for line in log_tail)
+    model_loaded = "Keras CNN loaded:" in log_text if "log_text" in locals() else False
+    input_ready = "Detector input ready:" in log_text if "log_text" in locals() else False
     return {
         "running": running,
         "state": "running" if running else ("failed" if returncode not in (None, 0) else "stopped"),
@@ -553,7 +553,7 @@ def detector_start(payload: DetectorStartPayload, user: dict = Depends(require_r
     try:
         if DETECTOR_LOG_HANDLE and not DETECTOR_LOG_HANDLE.closed:
             DETECTOR_LOG_HANDLE.close()
-        DETECTOR_LOG_HANDLE = open(DETECTOR_LOG, "a", encoding="utf-8")
+        DETECTOR_LOG_HANDLE = open(DETECTOR_LOG, "w", encoding="utf-8")
         DETECTOR_PROCESS = subprocess.Popen(
             [sys.executable, "-m", "live_system.advanced_live"],
             stdin=subprocess.DEVNULL, stdout=DETECTOR_LOG_HANDLE,
