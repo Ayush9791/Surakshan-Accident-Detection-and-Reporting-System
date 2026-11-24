@@ -84,6 +84,12 @@ class SimulatedDispatchPayload(BaseModel):
     destination: str = Field(default="DEMO-CONTROL-ROOM", min_length=1, max_length=128)
     channel: str = Field(default="dashboard-demo", min_length=1, max_length=64)
 
+class DetectorStartPayload(BaseModel):
+    source: Literal["pc-camera", "ip-webcam", "video-file"] = "pc-camera"
+    camera_url: str = Field(default="http://10.63.101.159:8080/video", max_length=2048)
+    video_path: str = Field(default="", max_length=4096)
+
+
 
 class LoginPayload(BaseModel):
     username: str = Field(min_length=1, max_length=80)
@@ -487,14 +493,32 @@ def list_simulated_dispatches(limit: int = Query(default=50, ge=1, le=200),
 @app.get("/detector/status")
 def detector_status(user: dict = Depends(require_roles("admin", "authority"))):
     running = DETECTOR_PROCESS is not None and DETECTOR_PROCESS.poll() is None
-    return {"running": running, "mode": "server-local-webcam", "note": "Inference uses the webcam attached to the API host."}
+    return {"running": running, "mode": "selectable-local-input", "note": "The selected camera or file must be accessible to the machine running this API."}
 
 
 @app.post("/detector/start")
-def detector_start(user: dict = Depends(require_roles("admin", "authority"))):
+def detector_start(payload: DetectorStartPayload, user: dict = Depends(require_roles("admin", "authority"))):
     global DETECTOR_PROCESS, DETECTOR_LOG_HANDLE
     if DETECTOR_PROCESS is not None and DETECTOR_PROCESS.poll() is None:
         return {"running": True, "message": "Detector is already running"}
+    detector_env = os.environ.copy()
+    detector_env["SURAKSHAN_CAMERA_SOURCE"] = payload.source
+
+    if payload.source == "ip-webcam":
+        camera_url = payload.camera_url.strip()
+        if not camera_url.startswith(("http://", "https://")):
+            raise HTTPException(status_code=422, detail="IP Webcam URL must start with http:// or https://.")
+        detector_env["SURAKSHAN_CAMERA_URL"] = camera_url
+    elif payload.source == "video-file":
+        video_path = Path(payload.video_path).expanduser()
+        if not video_path.is_absolute():
+            video_path = (PROJECT_ROOT / video_path).resolve()
+        else:
+            video_path = video_path.resolve()
+        if not video_path.is_file():
+            raise HTTPException(status_code=422, detail="Video file not found on the API host. Enter a path accessible to that machine.")
+        detector_env["SURAKSHAN_VIDEO_PATH"] = str(video_path)
+
     try:
         if DETECTOR_LOG_HANDLE and not DETECTOR_LOG_HANDLE.closed:
             DETECTOR_LOG_HANDLE.close()
@@ -502,15 +526,15 @@ def detector_start(user: dict = Depends(require_roles("admin", "authority"))):
         DETECTOR_PROCESS = subprocess.Popen(
             [sys.executable, "-m", "live_system.advanced_live"],
             stdin=subprocess.DEVNULL, stdout=DETECTOR_LOG_HANDLE,
-            stderr=subprocess.STDOUT, cwd=str(PROJECT_ROOT),
+            stderr=subprocess.STDOUT, cwd=str(PROJECT_ROOT), env=detector_env,
         )
         db = connect()
         try:
-            audit(db, user["username"], "detector_started", "Local host webcam inference")
+            audit(db, user["username"], "detector_started", f"Input source: {payload.source}")
             db.commit()
         finally:
             db.close()
-        return {"running": True, "pid": DETECTOR_PROCESS.pid, "message": "Detector started on the API host"}
+        return {"running": True, "pid": DETECTOR_PROCESS.pid, "message": f"Detector started using {payload.source} input"}
     except OSError as exc:
         if DETECTOR_LOG_HANDLE and not DETECTOR_LOG_HANDLE.closed:
             DETECTOR_LOG_HANDLE.close()
