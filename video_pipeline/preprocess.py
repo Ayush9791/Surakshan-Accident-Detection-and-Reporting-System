@@ -608,6 +608,7 @@ def _process_sequence(capture, record, sequence, dataset_root, config):
     frame_rows = [{
         "source_video": record["relative_path"],
         "video_id": record["video_id"],
+        "source_group_id": sequence["source_group_id"],
         "sequence_id": sequence["sequence_id"],
         "split": sequence["split"],
         "class_name": sequence["class_name"],
@@ -703,7 +704,7 @@ def _finalize_manifests(output_root: Path):
         "skipped_frame_count", "status",
     ]
     frame_fields = [
-        "source_video", "video_id", "sequence_id", "split", "class_name", "time_seconds",
+        "source_video", "video_id", "source_group_id", "sequence_id", "split", "class_name", "time_seconds",
         "frame_path", "laplacian_variance", "phash64", "phash_distance_previous", "quality_note", "status",
     ]
     skip_fields = [
@@ -814,7 +815,29 @@ def prepare_video_dataset(config, config_path, project_root=PROJECT_ROOT, worker
         item["path"] = current["path"]
         item["normal_ranges"] = current["normal_ranges"]
 
-    assignments, groups = assign_group_splits(inspected, split_config, int(prep["seed"]))
+    eligible_records = []
+    excluded_records = []
+    for record in inspected:
+        reason = None
+        if record.get("duplicate_label_conflict"):
+            reason = "exact_duplicate_has_conflicting_labels"
+        elif record.get("label") is None:
+            reason = record.get("label_confidence", "unresolved_label")
+        elif record.get("source") == "TAD" and record.get("label") == "Accident":
+            reason = "accident_video_has_no_event_timestamp"
+        elif not record.get("opened") or record.get("read_status") == "cannot_open":
+            reason = "video_cannot_be_opened"
+        elif record.get("fps", 0) <= 0 or record.get("frame_count", 0) <= 0:
+            reason = "video_has_no_usable_frame_metadata"
+        elif record.get("duplicate_of") and record["duplicate_of"] != record.get("relative_path"):
+            reason = "exact_duplicate_copy"
+
+        if reason:
+            excluded_records.append({**record, "exclusion_reason": reason})
+        else:
+            eligible_records.append(record)
+
+    assignments, groups = assign_group_splits(eligible_records, split_config, int(prep["seed"]))
     for split in SPLITS:
         for class_name in CLASS_NAMES:
             (output_root / split / class_name).mkdir(parents=True, exist_ok=True)
@@ -830,6 +853,15 @@ def prepare_video_dataset(config, config_path, project_root=PROJECT_ROOT, worker
         ),
     }
     _write_json(output_root / "split_manifest.json", split_manifest)
+    exclusion_fields = [
+        "relative_path", "source", "label", "label_confidence", "exclusion_reason",
+        "read_status", "opened", "sample_reads",
+    ]
+    _write_csv(output_root / "preprocessing_exclusions.csv", [
+        {**item, "sample_reads": json.dumps(item.get("sample_reads", []))}
+        for item in excluded_records
+    ], exclusion_fields)
+    excluded_by_path = {item["relative_path"]: item["exclusion_reason"] for item in excluded_records}
 
     video_manifest_path = output_root / "videos_manifest.jsonl"
     sequence_manifest_path = output_root / "sequences_manifest.jsonl"
@@ -842,6 +874,8 @@ def prepare_video_dataset(config, config_path, project_root=PROJECT_ROOT, worker
     processed = 0
 
     for index, record in enumerate(inspected, 1):
+        if record["relative_path"] in excluded_by_path:
+            continue
         if record.get("label") is None or record.get("split") in (None, "unresolved"):
             if not record.get("unresolved_logged"):
                 _append_jsonl(video_manifest_path, [{
@@ -950,6 +984,8 @@ def prepare_video_dataset(config, config_path, project_root=PROJECT_ROOT, worker
         },
         "tad_official_test_groups_preserved": split_manifest["tad_test_groups_locked"],
         "video_manifest_statuses": dict(Counter(item["preprocessing_status"] for item in final_videos)),
+        "excluded_videos_by_reason": dict(Counter(item["exclusion_reason"] for item in excluded_records)),
+        "eligible_source_video_count": len(eligible_records),
         "sequences_by_split_class": {
             split: dict(Counter(
                 item["class_name"] for item in final_sequences if item.get("split") == split and item.get("status") == "ready"

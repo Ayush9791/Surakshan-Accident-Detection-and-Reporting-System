@@ -133,6 +133,111 @@ def make_group_balanced_sampler(sequences, seed=42):
     )
 
 
+def read_frame_manifest(dataset_root: Path):
+    """Load extracted frames and reject source-video split leakage."""
+    dataset_root = Path(dataset_root).resolve()
+    manifest_path = dataset_root / "frames_manifest.csv"
+    if not manifest_path.is_file():
+        raise FileNotFoundError(
+            f"Missing {manifest_path}. Run `python preprocess_video_dataset.py` first."
+        )
+
+    rows = []
+    group_splits = defaultdict(set)
+    seen_paths = set()
+    with manifest_path.open("r", newline="", encoding="utf-8-sig") as stream:
+        for row in csv.DictReader(stream):
+            if row.get("status") != "kept":
+                continue
+            split = row.get("split")
+            class_name = row.get("class_name")
+            if split not in {"train", "val", "test"} or class_name not in CLASS_TO_IDX:
+                raise ValueError(f"Invalid frame manifest row: {row}")
+            relative = Path(row.get("frame_path", ""))
+            image_path = (dataset_root / relative).resolve()
+            try:
+                image_path.relative_to(dataset_root)
+            except ValueError as error:
+                raise ValueError(f"Frame path escapes dataset root: {relative}") from error
+            if not image_path.is_file():
+                raise FileNotFoundError(f"Manifest references missing image: {image_path}")
+            if str(image_path).casefold() in seen_paths:
+                raise ValueError(f"Duplicate frame manifest path: {image_path}")
+            seen_paths.add(str(image_path).casefold())
+
+            source_group_id = row.get("source_group_id") or row.get("video_id") or row.get("source_video")
+            if not source_group_id:
+                raise ValueError(f"Frame has no source-video group identifier: {row}")
+            sequence_id = row.get("sequence_id")
+            if not sequence_id:
+                raise ValueError(f"Frame has no annotated window identifier: {row}")
+            group_splits[source_group_id].add(split)
+            rows.append({
+                "image_path": image_path,
+                "label": CLASS_TO_IDX[class_name],
+                "class_name": class_name,
+                "split": split,
+                "source_group_id": source_group_id,
+                "sequence_id": sequence_id,
+                "source_video": row.get("source_video", ""),
+            })
+
+    leaking = {group: splits for group, splits in group_splits.items() if len(splits) > 1}
+    if leaking:
+        raise ValueError(f"Source video groups cross splits: {list(leaking.items())[:5]}")
+    if not rows:
+        raise ValueError(f"No usable frames in {manifest_path}")
+    return rows
+
+
+class FrameImageDataset(Dataset):
+    """Image classifier dataset backed by the audited frame manifest."""
+
+    def __init__(self, rows, image_size=224, training=False):
+        self.rows = rows
+        augmentations = [transforms.Resize((int(image_size), int(image_size)), antialias=True)]
+        if training:
+            augmentations.extend([
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.ColorJitter(brightness=0.12, contrast=0.08),
+            ])
+        augmentations.extend([
+            transforms.ToTensor(),
+            transforms.Normalize(MEAN, STD),
+        ])
+        self.transform = transforms.Compose(augmentations)
+
+    def __len__(self):
+        return len(self.rows)
+
+    def __getitem__(self, index):
+        row = self.rows[index]
+        try:
+            with Image.open(row["image_path"]) as source:
+                image = self.transform(source.convert("RGB"))
+        except Exception as error:
+            raise RuntimeError(f"Failed to load audited training frame {row['image_path']}") from error
+        return image, row["label"], row["source_group_id"], row["sequence_id"]
+
+
+def make_frame_group_balanced_sampler(rows, seed=42):
+    """Balance classes and prevent long videos from dominating training."""
+    frames_per_group = Counter((row["label"], row["source_group_id"]) for row in rows)
+    groups_per_class = {
+        label: len({row["source_group_id"] for row in rows if row["label"] == label})
+        for label in (0, 1)
+    }
+    weights = [
+        1.0 / max(1, groups_per_class[row["label"]])
+        / max(1, frames_per_group[(row["label"], row["source_group_id"])])
+        for row in rows
+    ]
+    return WeightedRandomSampler(
+        weights, num_samples=len(weights), replacement=True,
+        generator=torch.Generator().manual_seed(seed),
+    )
+
+
 def split_sequence_counts(sequences):
     counts = {split: Counter() for split in ("train", "val", "test")}
     for item in sequences:

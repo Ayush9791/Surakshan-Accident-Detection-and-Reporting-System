@@ -1,6 +1,6 @@
 # Surakshan — Traffic Incident Detection and Response Platform
 
-Surakshan is a college-project prototype that combines webcam-based accident classification, incident persistence, role-based web dashboards, hospital assignment, audit logging, and simulated emergency notifications. It is designed to be demonstrated at zero cost on a Windows PC. The selected detector is a temporal R3D-18 video model; it remains a research prototype and has weak performance on unseen camera footage.
+Surakshan is a college-project prototype that combines webcam-based accident classification, incident persistence, role-based web dashboards, hospital assignment, audit logging, and simulated emergency notifications. Its current training baseline is an ImageNet-pretrained ResNet-18 frame classifier. Live inference samples camera frames and requires three consecutive above-threshold predictions before creating an incident.
 
 > **Important:** this is not a certified emergency system. The AI can miss incidents or raise false alerts. Dispatch is simulated only; no police, ambulance, hospital, or emergency service is contacted. The API and demo accounts are not production-hardened. Do not expose the service publicly as-is.
 
@@ -110,19 +110,30 @@ cd dashboard-web
 npm run build
 ```
 
-## AI model and dataset plan
+## Training the accident classifier
 
-The last trained candidate was a Kinetics-initialized R3D-18 temporal classifier, fine-tuned on the real and synthetic ACCIDENT benchmark data. The old video transform cropped the center of each frame and excluded the annotated accident center in about 11% of real clips. The candidate kept the whole frame using an aspect-preserving letterbox transform. Additional reviewed normal clips from the Zenodo road-monitoring collection were tried in a separate training run, but did not improve held-out performance. The model checkpoint was deleted at the user's request; run the training script to create a new one.
+The training pipeline uses videos under `vid_dataset/` as source material and extracts filtered 224×224 frames into `dataset/resnet18_frames/`. Original videos and the existing image folders are left in place. Splits are assigned by source-video group before frame extraction.
 
-The training and held-out evaluation use the CCTV-focused **ACCIDENT** dataset:
-- Dataset and benchmark: https://accidentbench.github.io/
-- Paper: https://openaccess.thecvf.com/content/CVPR2026W/AUTOPILOT/html/Picek_ACCIDENT_A_Benchmark_Dataset_for_Vehicle_Accident_Detection_from_Traffic_CVPRW_2026_paper.html
+The audited video set contains 981 accident videos with annotated event times, 127 TAD normal videos, and 6 reviewed normal traffic ranges. It excludes 277 TAD accident videos that have no event timestamps, 29 videos from the unrelated air-space question-answer benchmark, and 3 traffic videos without reviewed normal ranges. Accident clips contribute positive samples around their annotated event time; pre-event negatives are sampled only before the annotated time with a two-second safety margin. The existing legacy image folders are not used because 11 source-video groups cross their saved splits.
 
-Recommended future approach: pretrained vehicle detector + multi-object tracker + temporal accident-recognition model. Split train/validation/test by source video or camera, include hard negative traffic events, and report event recall, false alerts per camera-hour, detection delay, and performance on unseen cameras. Check dataset licensing and annotation formats before use.
+Run these commands in PowerShell from the repository root:
 
-The ACCIDENT dataset is available to the trainer at `dataset/ACCIDENT` through a local link to `C:\Users\AYUSH\Downloads\archive (1)`; this avoids copying about 15 GB. To train from scratch, run `python train.py`. It caches decoded clips so extraction can resume, selects the checkpoint and alert threshold using source-grouped validation data, and evaluates the geo-aware test split once at the end. Add `--include-reviewed-normal-data` to include clips from `dataset/traffic_eval_ccby/verified_normal_videos.txt` as training-only negatives. That local subset is from [Zenodo record 14041920](https://doi.org/10.5281/zenodo.14041920), licensed CC BY 4.0; see `dataset/traffic_eval_ccby/SOURCE.txt` for attribution.
+```powershell
+.\.venv\Scripts\python.exe preprocess_video_dataset.py --workers 8
+.\.venv\Scripts\python.exe train.py
+```
 
-Before deletion, the last checkpoint scored 59.1% accuracy and 58.0% balanced accuracy on the geo-aware held-out real ACCIDENT split at its source-grouped validation-selected threshold (0.58). At threshold 0.50 it scored 59.9% accuracy, 57.7% balanced accuracy, and 49.6% specificity. The full-frame change improved the earlier result modestly, but results are still too weak for dependable real-world alerts.
+Training uses a fresh ImageNet-pretrained ResNet-18, automatically selects CUDA when available, freezes the backbone for two epochs, then fine-tunes the final residual block. Class- and source-group-balanced sampling addresses the class imbalance. The validation split selects the checkpoint and accident threshold; the test split is evaluated once afterward. The best checkpoint is saved at `models/resnet18/resnet18_best.pth`; the training report and confusion matrix are saved under `results/resnet18/`.
+
+The first training run needs Internet access to download TorchVision's ImageNet ResNet-18 weights from `download.pytorch.org`. It fails clearly instead of silently training from random weights if those weights are unavailable. No fresh-model test metrics are available until that training run completes.
+
+To run the camera detector after training, use:
+
+```powershell
+.\.venv\Scripts\python.exe -m live_system.advanced_live
+```
+
+The predictor loads only `models/resnet18/resnet18_best.pth`, uses the validation-tuned threshold by default, and accepts `SURAKSHAN_ACCIDENT_THRESHOLD` and `SURAKSHAN_ALERT_CONSECUTIVE` environment overrides. Potential incidents include the prediction timestamp and an evidence JPEG in the existing FastAPI alert flow.
 
 ## Zero-cost deployment guidance
 

@@ -71,6 +71,7 @@ class AlertPayload(BaseModel):
     event: str = Field(default="POTENTIAL_ACCIDENT", max_length=64)
     incident_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    incident_timestamp: Optional[str] = Field(default=None, max_length=64)
     evidence_image: Optional[str] = Field(default=None, max_length=1_700_000)
 
 
@@ -298,6 +299,16 @@ def receive_alert(payload: AlertPayload, x_detector_token: Optional[str] = Heade
         raise HTTPException(status_code=401, detail="Invalid detector token")
     incident_id = payload.incident_id or str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    if payload.incident_timestamp:
+        try:
+            parsed_timestamp = datetime.fromisoformat(
+                payload.incident_timestamp.replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid incident timestamp") from exc
+        if parsed_timestamp.tzinfo is None:
+            raise HTTPException(status_code=422, detail="Incident timestamp must include a timezone")
+        timestamp = parsed_timestamp.astimezone(timezone.utc).isoformat(timespec="seconds")
     evidence_path = ""
     if payload.evidence_image:
         try:

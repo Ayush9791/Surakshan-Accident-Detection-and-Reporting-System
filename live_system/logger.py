@@ -12,8 +12,8 @@ class AccidentLogger:
             self.log_file = PROJECT_ROOT / self.log_file
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
 
-    def log(self, camera_id, incident_id=None):
-        timestamp = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    def log(self, camera_id, incident_id=None, timestamp=None):
+        timestamp = timestamp or datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
         incident = incident_id or "unassigned"
         entry = f"{timestamp} - POTENTIAL_ACCIDENT camera={camera_id} incident={incident}\n"
         with self.log_file.open("a", encoding="utf-8") as handle:

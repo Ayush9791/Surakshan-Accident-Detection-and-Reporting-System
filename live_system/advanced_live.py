@@ -67,7 +67,11 @@ def main():
                 if details["is_new_prediction"] and gates[cam_id].update(label):
                     incident_id = str(uuid.uuid4())
                     print(f"[INCIDENT] Potential accident {incident_id} on {cam_id}", flush=True)
-                    logger.log(cam_id, incident_id=incident_id)
+                    logger.log(
+                        cam_id,
+                        incident_id=incident_id,
+                        timestamp=details.get("incident_timestamp"),
+                    )
                     # Save the annotated trigger frame and attach it to the remote alert.
                     evidence_path = recorder.save_snapshot(frame, cam_id, incident_id)
                     recorder.start_incident(cam_id)
@@ -76,6 +80,7 @@ def main():
                         incident_id=incident_id,
                         confidence=details["accident_probability"],
                         image_path=evidence_path,
+                        incident_timestamp=details.get("incident_timestamp"),
                     )
 
                 cv2.imshow(cam_id, frame)

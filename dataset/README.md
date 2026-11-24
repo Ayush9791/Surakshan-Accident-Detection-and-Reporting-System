@@ -1,40 +1,30 @@
-# Training data
+# Local training data
 
-## Primary dataset: ACCIDENT
+The ResNet-18 pipeline reads original videos from the ignored `vid_dataset/` directory and writes newly sampled images and manifests to the ignored `dataset/resnet18_frames/` directory. Source videos and pre-existing images are preserved.
 
-`ACCIDENT/` is a local directory junction to `C:\Users\AYUSH\Downloads\archive (1)`. The videos are not copied; keep the source folder in place. This avoids a second copy of about 15.5 GB.
+## Audited video sources
 
-The metadata files list:
+- `vid_dataset/archive (1)/`: 981 videos with ACCIDENT event-time metadata. The trainer samples positive frames around each annotated event and may use pre-event frames as negatives only when they end at least two seconds before the annotated event.
+- `vid_dataset/TAD-benchmark/`: 127 normal videos are used as genuine negative footage. Its 277 accident videos do not provide event timestamps, so they are excluded from frame-level supervision.
+- `vid_dataset/traffic_eval_ccby/`: six reviewed normal time ranges are included in training only. Three videos without reviewed ranges are excluded.
+- `vid_dataset/Accident-Bench/`: 29 air-space question-answer videos are not binary road-accident data and are excluded.
+- `vid_dataset/TAD/`: empty.
 
-- 2,027 real surveillance clips with `split_geo_aware` assignments in `metadata-real.csv`.
-- 2,211 synthetic clips listed in `metadata-synthetic.csv`.
-- At extraction time, 981 real videos matched metadata paths by filename. The other 1,046 real clips and all 2,211 synthetic videos were unavailable. The archive link under Downloads has since become unavailable.
-- The frame folders use normalized 75:15:15 proportions (71.4:14.3:14.3). The extracted clips were reassigned by their saved path hashes because the source metadata is no longer accessible; accident and normal sequences from one clip remain together, but sibling segments from the same original video cannot be verified. This is not the official geo-aware test partition.
+The full audit inspected 1,423 videos (7.661 GiB). It found no exact duplicate videos, 17 near-duplicate candidates retained for review, and seven videos with a failed sampled read near the end. Frame-level extraction failures and quality filters are recorded in `dataset/resnet18_frames/skipped_frames.csv`; excluded videos and reasons are recorded in `dataset/resnet18_frames/preprocessing_exclusions.csv`.
 
-The trainer uses each clip's `accident_time` to sample a positive window and a pre-impact normal window where there is enough separation. It omits ambiguous early negatives. Very short clips remain positive examples; the trainer samples frames across their available duration. Project page and annotations: https://accidentbench.github.io/.
+## Preserved legacy images
 
-## Additional dataset researched: TAD
+The existing `dataset/train/`, `dataset/val/`, and `dataset/test/` contain 7,578 valid images. They remain untouched and are not used by the new training run: mapping their clip hashes back to source metadata found 11 original-video groups represented across multiple splits. The older `dataset/rebuilt_video/` output is also preserved; the new model uses only the newly generated `dataset/resnet18_frames/` manifest.
 
-The closest additional public source found is [TAD: A Large-scale Benchmark for Traffic Accidents Detection from Video Surveillance](https://github.com/UnicomAI/UnicomBenchmark/tree/main/TADBench), which is specifically highway surveillance video and includes both accident and normal labels. Its repository links a Google Drive archive. The README's stated total (344) conflicts with its class counts (277 + 127 = 404); the paper reports 404 videos and an official development/test split. Check the archive's current contents and terms before combining it with ACCIDENT, and keep its official test set untouched. It has **not** been downloaded or added to training: this machine's download connection could not resolve `drive.google.com`, and the public README does not state a dataset license. Paper: https://arxiv.org/abs/2209.12386.
+## Prepare and train
 
-## Optional normal-traffic supplement
-
-`traffic_eval_ccby/` contains a small subset of fixed-camera road-monitoring videos from Tiago Silva's [Zenodo dataset](https://doi.org/10.5281/zenodo.14041920), licensed CC BY 4.0. `verified_normal_videos.txt` specifies the reviewed file/time ranges. The footage was visually spot-checked for collisions and is training-only; it is not a held-out benchmark. Earlier training attempts with these clips did not improve the ACCIDENT geo-aware test score, so the trainer excludes them by default. To include them, pass `--include-reviewed-normal-data`.
-
-## Folder layout
-
-- `ACCIDENT/` is the required source dataset for the current video trainer.
-- `train/`, `val/`, and `test/` hold image-only frame-classification data. `prepare_video_dataset.py` appends processed images to their existing `Accident` and `Non Accident` class folders and preserves existing images. The requested 75:15:15 proportions are normalized to approximately 71.4:14.3:14.3 because they sum to 105%. `python prepare_video_dataset.py --reassign-only` reapportions already extracted groups without needing the source videos; a full extraction requires the ACCIDENT metadata and videos. Counts and split details are in `frame_split_manifest.json`. Pre-existing videos and other non-image files are kept in the ignored project-level `source_videos_archive/`. `train.py` trains a temporal MobileNet-GRU from the grouped generated frames and ignores unrelated existing images in those folders.
-- `traffic_eval_ccby/` is optional and used only with `--include-reviewed-normal-data`.
-- `cache/` contains the active decoded-clip cache and extraction chunks. Keep it if you want extraction to resume without re-reading and decoding all videos. It is generated locally and ignored by Git.
-
-## Start training
-
-Prepare the frames once, then train from the project root:
+From the repository root in PowerShell:
 
 ```powershell
-python prepare_video_dataset.py
-.venv\Scripts\python.exe train.py
+.\.venv\Scripts\python.exe preprocess_video_dataset.py --workers 8
+.\.venv\Scripts\python.exe train.py
 ```
 
-The trainer selects its checkpoint and threshold using validation sequences, evaluates the held-out test split once, and saves `surakshan_model.pth`. The checkpoint format is supported by the live predictor.
+The preprocessor splits source groups before sampling frames. It keeps TAD's official test videos in the test split, uses a fixed seed, samples at 2 FPS, letterboxes to 224×224, filters unusable and near-duplicate frames, and saves an audit manifest. The ResNet-18 trainer uses class- and source-group-balanced sampling, tunes the decision threshold on validation, and evaluates the held-out test split only after model selection.
+
+The first training run downloads ImageNet ResNet-18 weights from TorchVision if they are not already cached. It does not load the legacy `surakshan_model.pth` checkpoint.

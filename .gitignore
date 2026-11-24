@@ -19,6 +19,7 @@ dataset/train/
 dataset/val/
 dataset/test/
 dataset/rebuilt_video/
+dataset/resnet18_frames/
 dataset/frame_split_manifest.json
 dataset/dataset_stats.json
 vid_dataset/

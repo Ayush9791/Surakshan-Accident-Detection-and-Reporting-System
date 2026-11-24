@@ -60,11 +60,11 @@ def choose_recall_threshold(labels, probabilities, recall_target=0.90):
     return best["threshold"], "best_f1_recall_target_unmet"
 
 
-def classification_report(labels, probabilities, threshold):
+def classification_report(labels, probabilities, threshold, unit_name="source-video aggregated"):
     metrics = binary_metrics(labels, probabilities, threshold)
     matrix = metrics["confusion_matrix"]
     names = ("Non_Accident", "Accident")
-    lines = ["Classification report (source-video aggregated)", "", f"Threshold: {threshold:.4f}", "",
+    lines = [f"Classification report ({unit_name})", "", f"Threshold: {threshold:.4f}", "",
              f"{'class':<18}{'precision':>11}{'recall':>11}{'f1-score':>11}{'support':>11}"]
     for index, name in enumerate(names):
         tp = matrix[index][index]
@@ -85,22 +85,25 @@ def _canvas(width=900, height=560, title=""):
     return image
 
 
-def save_history_plots(history, results_dir: Path):
+def save_history_plots(history, results_dir: Path, prefix=""):
     results_dir.mkdir(parents=True, exist_ok=True)
     epochs = [item["epoch"] for item in history]
     for key, filename, title in [
-        ("train_loss", "training_loss.png", "Training loss"),
-        ("val_loss", "validation_loss.png", "Validation loss"),
-        ("train_accuracy", "accuracy.png", "Training and validation accuracy"),
+        ("train_loss", f"{prefix}training_loss.png", "Training loss"),
+        ("val_loss", f"{prefix}validation_loss.png", "Validation loss"),
+        ("train_frame_accuracy", f"{prefix}accuracy.png", "Training and validation frame accuracy"),
     ]:
         image = _canvas(title=title)
         plot = (65, 70, 840, 475)
         x0, y0, x1, y1 = plot
         cv2.rectangle(image, (x0, y0), (x1, y1), (80, 80, 80), 1)
-        values = [item.get(key) for item in history]
-        if key == "train_accuracy":
+        values = [
+            item.get(key, item.get("train_accuracy") if key == "train_frame_accuracy" else None)
+            for item in history
+        ]
+        if key in {"train_accuracy", "train_frame_accuracy"}:
             series = [(values, (200, 80, 30), "train")]
-            val = [item.get("val_accuracy") for item in history]
+            val = [item.get("val_frame_accuracy", item.get("val_accuracy")) for item in history]
             series.append((val, (40, 150, 40), "validation"))
             ymin, ymax = 0.0, 1.0
         else:
@@ -124,8 +127,12 @@ def save_history_plots(history, results_dir: Path):
         cv2.imwrite(str(results_dir / filename), image)
 
 
-def save_confusion_matrix(metrics, results_dir: Path):
-    image = _canvas(700, 520, "Held-out test confusion matrix (video-level)")
+def save_confusion_matrix(
+    metrics, results_dir: Path,
+    title="Held-out test confusion matrix (video-level)",
+    filename="confusion_matrix.png",
+):
+    image = _canvas(700, 520, title)
     matrix = metrics["confusion_matrix"]
     labels = (("TN", "FP"), ("FN", "TP"))
     colors = ((190, 225, 190), (190, 190, 240))
@@ -136,4 +143,4 @@ def save_confusion_matrix(metrics, results_dir: Path):
             cv2.rectangle(image, (x, y), (x + 210, y + 140), (50, 50, 50), 2)
             cv2.putText(image, f"{labels[row][col]}: {matrix[row][col]}", (x + 25, y + 75),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (20, 20, 20), 2, cv2.LINE_AA)
-    cv2.imwrite(str(results_dir / "confusion_matrix.png"), image)
+    cv2.imwrite(str(results_dir / filename), image)

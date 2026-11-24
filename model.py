@@ -26,6 +26,21 @@ class AccidentNet(nn.Module):
         return self.fc(x)
 
 
+class ResNet18AccidentNet(nn.Module):
+    """ImageNet-pretrained ResNet-18 with a fresh binary classification head."""
+
+    def __init__(self, pretrained_backbone=False):
+        super().__init__()
+        from torchvision.models import ResNet18_Weights, resnet18
+
+        weights = ResNet18_Weights.DEFAULT if pretrained_backbone else None
+        self.backbone = resnet18(weights=weights)
+        self.backbone.fc = nn.Linear(self.backbone.fc.in_features, 2)
+
+    def forward(self, images):
+        return self.backbone(images)
+
+
 class VideoAccidentNet(nn.Module):
     """ImageNet feature extractor with a bidirectional temporal GRU head."""
 

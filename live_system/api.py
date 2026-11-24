@@ -7,13 +7,17 @@ API_URL = os.environ.get("SURAKSHAN_ALERT_URL", "http://127.0.0.1:5000/alert")
 DETECTOR_TOKEN = os.environ.get("SURAKSHAN_DETECTOR_TOKEN", "")
 
 
-def send_alert(camera_id, location="Unknown", incident_id=None, confidence=None, image_path=None):
+def send_alert(
+    camera_id, location="Unknown", incident_id=None, confidence=None,
+    image_path=None, incident_timestamp=None,
+):
     payload = {
         "camera_id": camera_id,
         "location": location,
         "event": "POTENTIAL_ACCIDENT",
         "incident_id": incident_id,
         "confidence": confidence,
+        "incident_timestamp": incident_timestamp,
     }
     if image_path:
         try:
