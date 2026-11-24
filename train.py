@@ -1,7 +1,10 @@
-"""Train and evaluate a source-video-grouped ResNet-18 accident classifier."""
+
+"""Train and evaluate Surakshan's Keras CNN accident classifier."""
+
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import random
@@ -9,403 +12,742 @@ import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
+import cv2
 import numpy as np
-import torch
-from torch import nn
-from torch.utils.data import DataLoader
-
-from model import ResNet18AccidentNet
-from video_pipeline.data import (
-    CLASS_TO_IDX,
-    FrameImageDataset,
-    make_frame_group_balanced_sampler,
-    read_frame_manifest,
+import tensorflow as tf
+from tensorflow.keras import Sequential
+from tensorflow.keras.layers import (
+    Input,
+    Conv2D,
+    BatchNormalization,
+    MaxPooling2D,
+    Flatten,
+    Dense,
+    Dropout,
 )
-from video_pipeline.metrics import (
-    binary_metrics,
-    choose_recall_threshold,
-    classification_report,
-    save_confusion_matrix,
-    save_history_plots,
-)
-from video_pipeline.preprocess import load_config
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+
+IMAGE_SIZE = 128
+ACCIDENT_INDEX = 0
+NON_ACCIDENT_INDEX = 1
+
+CLASS_TO_IDX = {
+    "Accident": ACCIDENT_INDEX,
+    "Non_Accident": NON_ACCIDENT_INDEX,
+}
+
+MODEL_PATH = (
+    PROJECT_ROOT
+    / "models"
+    / "keras"
+    / "car_accident_model.weights.h5"
+)
+
+RESULTS_ROOT = PROJECT_ROOT / "results" / "keras"
 
 
 def seed_everything(seed: int):
     random.seed(seed)
     np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.deterministic = True
+    tf.random.set_seed(seed)
 
 
-def seed_worker(worker_id: int):
-    worker_seed = torch.initial_seed() % (2**32)
-    np.random.seed(worker_seed)
-    random.seed(worker_seed)
+def configure_gpu():
+    """Enable TensorFlow GPU memory growth when a compatible GPU is available."""
+
+    gpus = tf.config.list_physical_devices("GPU")
+
+    if not gpus:
+        print("[SURAKSHAN] TensorFlow GPU not detected. Using CPU.", flush=True)
+        return
+
+    for gpu in gpus:
+        try:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        except RuntimeError as error:
+            print(f"[SURAKSHAN] GPU configuration warning: {error}", flush=True)
+
+    print(f"[SURAKSHAN] TensorFlow GPUs: {gpus}", flush=True)
 
 
-def atomic_torch_save(value, path: Path):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    torch.save(value, temporary)
-    os.replace(temporary, path)
+def load_config(path: Path):
+    with path.open("r", encoding="utf-8") as stream:
+        config = json.load(stream)
+
+    for section in ("paths", "preprocessing", "training"):
+        if section not in config:
+            raise ValueError(f"Configuration missing section: {section}")
+
+    return config
 
 
-def grouped_window_predictions(labels, probabilities, window_ids):
+def build_model():
+    """Build the same architecture used by live_system/predict.py."""
+
+    model = Sequential([
+        Input(shape=(IMAGE_SIZE, IMAGE_SIZE, 1)),
+
+        Conv2D(32, (3, 3), activation="relu", padding="same"),
+        BatchNormalization(),
+
+        Conv2D(32, (3, 3), activation="relu", padding="same"),
+        BatchNormalization(),
+        MaxPooling2D((2, 2)),
+
+        Conv2D(64, (3, 3), activation="relu", padding="same"),
+        BatchNormalization(),
+
+        Conv2D(64, (3, 3), activation="relu", padding="same"),
+        BatchNormalization(),
+        MaxPooling2D((2, 2)),
+
+        Conv2D(128, (3, 3), activation="relu", padding="same"),
+        BatchNormalization(),
+        MaxPooling2D((2, 2)),
+
+        Conv2D(128, (3, 3), activation="relu", padding="same"),
+        BatchNormalization(),
+        MaxPooling2D((2, 2)),
+
+        Flatten(),
+        Dense(128, activation="relu"),
+        Dropout(0.2),
+        Dense(64, activation="relu"),
+        Dropout(0.5),
+        Dense(2, activation="softmax"),
+    ])
+
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),
+        loss="sparse_categorical_crossentropy",
+        metrics=["accuracy"],
+    )
+
+    return model
+
+
+def read_frame_manifest(dataset_root: Path):
+    """Read the existing manifest and reject source-video split leakage."""
+
+    manifest_path = dataset_root / "frames_manifest.csv"
+
+    if not manifest_path.is_file():
+        raise FileNotFoundError(
+            f"Missing {manifest_path}. Run preprocess_video_dataset.py first."
+        )
+
+    rows = []
+    group_splits = defaultdict(set)
+    seen_paths = set()
+
+    with manifest_path.open(
+        "r", newline="", encoding="utf-8-sig"
+    ) as stream:
+        for row in csv.DictReader(stream):
+
+            if row.get("status") != "kept":
+                continue
+
+            split = row.get("split")
+            class_name = row.get("class_name")
+
+            if split not in {"train", "val", "test"}:
+                raise ValueError(f"Invalid split: {split}")
+
+            if class_name not in CLASS_TO_IDX:
+                raise ValueError(f"Invalid class name: {class_name}")
+
+            source_group_id = (
+                row.get("source_group_id")
+                or row.get("video_id")
+                or row.get("source_video")
+            )
+
+            sequence_id = row.get("sequence_id")
+
+            if not source_group_id or not sequence_id:
+                raise ValueError(
+                    f"Missing source group or sequence ID: {row}"
+                )
+
+            relative_path = Path(row.get("frame_path", ""))
+
+            image_path = (dataset_root / relative_path).resolve()
+
+            try:
+                image_path.relative_to(dataset_root.resolve())
+            except ValueError as error:
+                raise ValueError(
+                    f"Frame path escapes dataset root: {relative_path}"
+                ) from error
+
+            if not image_path.is_file():
+                raise FileNotFoundError(
+                    f"Missing training image: {image_path}"
+                )
+
+            path_key = str(image_path).casefold()
+
+            if path_key in seen_paths:
+                raise ValueError(f"Duplicate frame path: {image_path}")
+
+            seen_paths.add(path_key)
+            group_splits[source_group_id].add(split)
+
+            rows.append({
+                "image_path": str(image_path),
+                "label": CLASS_TO_IDX[class_name],
+                "class_name": class_name,
+                "split": split,
+                "source_group_id": source_group_id,
+                "sequence_id": sequence_id,
+            })
+
+    leaking = {
+        group: splits
+        for group, splits in group_splits.items()
+        if len(splits) > 1
+    }
+
+    if leaking:
+        raise ValueError(
+            f"Source videos cross dataset splits: {list(leaking.items())[:5]}"
+        )
+
+    if not rows:
+        raise ValueError("No usable frames found in the manifest.")
+
+    return rows
+
+
+def preprocess_image(path):
+    """Match live_system/predict.py preprocessing exactly."""
+
+    image = cv2.imread(path, cv2.IMREAD_COLOR)
+
+    if image is None:
+        raise RuntimeError(f"Could not read image: {path}")
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    resized = cv2.resize(
+        gray,
+        (IMAGE_SIZE, IMAGE_SIZE),
+        interpolation=cv2.INTER_AREA,
+    )
+
+    image = resized.astype(np.float32) / 255.0
+
+    return np.expand_dims(image, axis=-1)
+
+
+def load_image_tf(path, label, sample_weight):
+    """Bridge OpenCV preprocessing into TensorFlow's data pipeline."""
+
+    image = tf.py_function(
+        func=preprocess_image,
+        inp=[path],
+        Tout=tf.float32,
+    )
+
+    image.set_shape((IMAGE_SIZE, IMAGE_SIZE, 1))
+
+    return image, label, sample_weight
+
+
+def make_dataset(rows, batch_size, training=False, sample_weights=None):
+    paths = np.asarray(
+        [row["image_path"] for row in rows],
+        dtype=str,
+    )
+
+    labels = np.asarray(
+        [row["label"] for row in rows],
+        dtype=np.int32,
+    )
+
+    if sample_weights is None:
+        sample_weights = np.ones(len(rows), dtype=np.float32)
+
+    weights = np.asarray(sample_weights, dtype=np.float32)
+
+    dataset = tf.data.Dataset.from_tensor_slices(
+        (paths, labels, weights)
+    )
+
+    if training:
+        dataset = dataset.shuffle(
+            buffer_size=min(len(rows), 10000),
+            reshuffle_each_iteration=True,
+        )
+
+    dataset = dataset.map(
+        load_image_tf,
+        num_parallel_calls=tf.data.AUTOTUNE,
+    )
+
+    dataset = dataset.batch(batch_size)
+    dataset = dataset.prefetch(tf.data.AUTOTUNE)
+
+    return dataset
+
+
+def make_group_balanced_weights(rows):
+    """Balance classes and prevent long source videos dominating training."""
+
+    group_counts = Counter(
+        (row["label"], row["source_group_id"])
+        for row in rows
+    )
+
+    groups_per_class = {
+        label: len({
+            row["source_group_id"]
+            for row in rows
+            if row["label"] == label
+        })
+        for label in (ACCIDENT_INDEX, NON_ACCIDENT_INDEX)
+    }
+
+    weights = []
+
+    for row in rows:
+        label = row["label"]
+        group = row["source_group_id"]
+
+        weight = (
+            1.0
+            / max(1, groups_per_class[label])
+            / max(1, group_counts[(label, group)])
+        )
+
+        weights.append(weight)
+
+    weights = np.asarray(weights, dtype=np.float32)
+
+    # Keep average sample weight equal to one.
+    weights /= max(float(weights.mean()), 1e-8)
+
+    return weights
+
+
+def aggregate_windows(rows, probabilities):
+    """Average frame probabilities within each annotated video window."""
+
     grouped = defaultdict(list)
-    for label, probability, window_id in zip(labels, probabilities, window_ids):
-        grouped[str(window_id)].append((int(label), float(probability)))
-    output = []
-    for window_id, rows in grouped.items():
-        group_labels = {row[0] for row in rows}
-        if len(group_labels) != 1:
-            raise ValueError(f"An annotated video window has conflicting labels: {window_id}")
-        output.append((next(iter(group_labels)), float(np.mean([row[1] for row in rows])), window_id))
-    return (
-        [row[0] for row in output],
-        [row[1] for row in output],
-        [row[2] for row in output],
-    )
 
+    for row, probability in zip(rows, probabilities):
+        grouped[row["sequence_id"]].append(
+            (row["label"], float(probability))
+        )
 
-def evaluate(model, loader, device, criterion):
-    model.eval()
-    loss_sum, seen, frame_correct = 0.0, 0, 0
-    labels_all, probabilities_all, window_ids_all = [], [], []
-    amp_enabled = device.type == "cuda"
-    with torch.inference_mode():
-        for images, labels, _, window_ids in loader:
-            images = images.to(device, non_blocking=True)
-            labels = labels.to(device, dtype=torch.long, non_blocking=True)
-            with torch.autocast(
-                device_type=device.type,
-                dtype=torch.float16 if amp_enabled else torch.bfloat16,
-                enabled=amp_enabled,
-            ):
-                logits = model(images)
-                loss = criterion(logits.float(), labels)
-            probabilities = logits.float().softmax(1)[:, CLASS_TO_IDX["Accident"]]
-            loss_sum += float(loss.item()) * labels.size(0)
-            seen += labels.size(0)
-            frame_correct += int((logits.argmax(1) == labels).sum().item())
-            labels_all.extend(labels.cpu().tolist())
-            probabilities_all.extend(probabilities.cpu().tolist())
-            window_ids_all.extend(window_ids)
-    window_labels, window_probabilities, window_ids = grouped_window_predictions(
-        labels_all, probabilities_all, window_ids_all
-    )
+    labels = []
+    window_probabilities = []
+    window_ids = []
+
+    for window_id, values in grouped.items():
+        window_labels = {item[0] for item in values}
+
+        if len(window_labels) != 1:
+            raise ValueError(
+                f"Conflicting labels in annotated window: {window_id}"
+            )
+
+        labels.append(next(iter(window_labels)))
+
+        window_probabilities.append(
+            float(np.mean([item[1] for item in values]))
+        )
+
+        window_ids.append(window_id)
+
     return (
-        loss_sum / max(1, seen),
-        frame_correct / max(1, seen),
-        window_labels,
-        window_probabilities,
+        np.asarray(labels, dtype=np.int32),
+        np.asarray(window_probabilities, dtype=np.float32),
         window_ids,
     )
 
 
-def make_checkpoint(model, config, threshold, best_epoch, validation_metrics, seed):
+def predict_probabilities(model, rows, batch_size):
+    dataset = make_dataset(rows, batch_size)
+
+    image_dataset = dataset.map(
+        lambda image, label, weight: image,
+        num_parallel_calls=tf.data.AUTOTUNE,
+    )
+
+    predictions = model.predict(
+        image_dataset,
+        verbose=1,
+    )
+
+    return predictions[:, ACCIDENT_INDEX]
+
+
+def calculate_metrics(labels, probabilities, threshold):
+    predictions = (
+        probabilities >= threshold
+    ).astype(np.int32)
+
+    actual_positive = labels == ACCIDENT_INDEX
+    predicted_positive = predictions == ACCIDENT_INDEX
+
+    tp = int(np.sum(actual_positive & predicted_positive))
+    tn = int(np.sum(~actual_positive & ~predicted_positive))
+    fp = int(np.sum(~actual_positive & predicted_positive))
+    fn = int(np.sum(actual_positive & ~predicted_positive))
+
+    precision = tp / max(1, tp + fp)
+    recall = tp / max(1, tp + fn)
+    specificity = tn / max(1, tn + fp)
+    f1 = (
+        2 * precision * recall
+        / max(1e-8, precision + recall)
+    )
+    accuracy = (tp + tn) / max(1, len(labels))
+
     return {
-        "model_type": "resnet18_accident",
-        "state_dict": {key: value.detach().cpu() for key, value in model.state_dict().items()},
-        "class_to_idx": CLASS_TO_IDX,
-        "threshold": float(threshold),
-        "threshold_objective": "maximum specificity subject to validation accident recall target; otherwise best F1",
-        "image_size": int(config["preprocessing"]["image_size"]),
-        "mean": [0.485, 0.456, 0.406],
-        "std": [0.229, 0.224, 0.225],
-        "preprocessing": "OpenCV BGR to RGB; aspect-preserving 224x224 letterbox; ImageNet normalization",
-        "architecture": "TorchVision ResNet-18 ImageNet backbone with a new binary head",
-        "best_epoch": int(best_epoch),
-        "validation_window_metrics": validation_metrics,
-        "consecutive_positive_frames": int(config.get("inference", {}).get("consecutive_positive_frames", 3)),
-        "seed": int(seed),
-        "config": config,
+        "accuracy": accuracy,
+        "precision": precision,
+        "recall": recall,
+        "specificity": specificity,
+        "f1": f1,
+        "true_positive": tp,
+        "true_negative": tn,
+        "false_positive": fp,
+        "false_negative": fn,
+        "confusion_matrix": [[tn, fp], [fn, tp]],
     }
 
 
+def choose_threshold(labels, probabilities, recall_target=0.90):
+    """Choose maximum specificity subject to validation recall target."""
+
+    candidates = np.unique(
+        np.concatenate([
+            probabilities,
+            np.asarray([0.0, 1.0]),
+        ])
+    )
+
+    evaluated = [
+        (float(threshold), calculate_metrics(
+            labels, probabilities, float(threshold)
+        ))
+        for threshold in candidates
+    ]
+
+    eligible = [
+        item for item in evaluated
+        if item[1]["recall"] >= recall_target
+    ]
+
+    if eligible:
+        threshold, metrics = max(
+            eligible,
+            key=lambda item: (
+                item[1]["specificity"],
+                item[1]["f1"],
+                item[0],
+            ),
+        )
+
+        reason = (
+            "maximum specificity subject to validation recall target"
+        )
+
+    else:
+        threshold, metrics = max(
+            evaluated,
+            key=lambda item: (
+                item[1]["f1"],
+                item[1]["recall"],
+            ),
+        )
+
+        reason = "fallback: maximum validation F1"
+
+    return threshold, reason, metrics
+
+
+def save_json(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    temporary = path.with_suffix(path.suffix + ".tmp")
+
+    temporary.write_text(
+        json.dumps(value, indent=2),
+        encoding="utf-8",
+    )
+
+    os.replace(temporary, path)
+
+
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=Path("configs/resnet18_training.json"))
+    parser = argparse.ArgumentParser(
+        description="Train Surakshan's Keras CNN accident classifier."
+    )
+
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=Path("configs/resnet18_training.json"),
+    )
+
     parser.add_argument("--epochs", type=int)
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--workers", type=int)
+
     args = parser.parse_args()
 
     config_path = args.config.resolve()
     config = load_config(config_path)
-    settings = config["training"]
-    prep = config["preprocessing"]
-    if args.epochs is not None:
-        settings["epochs"] = args.epochs
-    if args.batch_size is not None:
-        settings["batch_size"] = args.batch_size
-    if args.workers is not None:
-        settings["num_workers"] = args.workers
 
-    seed = int(prep["seed"])
+    settings = config["training"]
+
+    epochs = args.epochs or int(settings.get("epochs", 20))
+    batch_size = args.batch_size or int(settings.get("batch_size", 32))
+    patience = int(settings.get("patience", 5))
+    learning_rate = float(settings.get("learning_rate", 0.0001))
+    recall_target = float(settings.get("recall_target", 0.90))
+
+    if epochs < 1 or batch_size < 1 or patience < 1:
+        raise ValueError("Epochs, batch size and patience must be positive.")
+
+    seed = int(config["preprocessing"].get("seed", 42))
+
     seed_everything(seed)
-    dataset_root = (PROJECT_ROOT / config["paths"]["dataset_root"]).resolve()
-    model_root = (PROJECT_ROOT / config["paths"]["models_root"]).resolve()
-    results_root = (PROJECT_ROOT / config["paths"]["results_root"]).resolve()
-    model_root.mkdir(parents=True, exist_ok=True)
-    results_root.mkdir(parents=True, exist_ok=True)
+    configure_gpu()
+
+    dataset_root = (
+        PROJECT_ROOT / config["paths"]["dataset_root"]
+    ).resolve()
+
+    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
+
+    print("[SURAKSHAN] Reading frame manifest...", flush=True)
 
     rows = read_frame_manifest(dataset_root)
-    by_split = {
-        split: [row for row in rows if row["split"] == split]
-        for split in ("train", "val", "test")
-    }
-    sequence_counts = {}
-    for split in ("train", "val", "test"):
-        split_rows = by_split[split]
-        labels = [row["class_name"] for row in split_rows]
-        sequence_counts[split] = len({row["sequence_id"] for row in split_rows})
-        print(
-            f"{split}: frames={len(split_rows)} windows={sequence_counts[split]} "
-            f"Accident={labels.count('Accident')} Non_Accident={labels.count('Non_Accident')}",
-            flush=True,
-        )
-        if not split_rows or {row["label"] for row in split_rows} != {0, 1}:
-            raise ValueError(f"{split} split must contain both Accident and Non_Accident frames")
-    if not by_split["train"] or not by_split["val"] or not by_split["test"]:
-        raise ValueError("Training, validation, and test splits must all contain frames")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}", flush=True)
-    if device.type == "cuda":
+    splits = {
+        name: [row for row in rows if row["split"] == name]
+        for name in ("train", "val", "test")
+    }
+
+    for name, split_rows in splits.items():
+        counts = Counter(row["class_name"] for row in split_rows)
+
         print(
-            f"GPU: {torch.cuda.get_device_name(0)}; "
-            f"VRAM={torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GiB",
+            f"{name}: frames={len(split_rows)} "
+            f"Accident={counts['Accident']} "
+            f"Non_Accident={counts['Non_Accident']} "
+            f"source_groups={len(set(row['source_group_id'] for row in split_rows))}",
             flush=True,
         )
 
-    image_size = int(prep["image_size"])
-    datasets = {
-        split: FrameImageDataset(
-            by_split[split], image_size=image_size, training=(split == "train")
-        )
-        for split in ("train", "val", "test")
-    }
-    sampler = make_frame_group_balanced_sampler(by_split["train"], seed=seed)
-    batch_size = int(settings["batch_size"])
-    workers = int(settings["num_workers"])
-    generator = torch.Generator().manual_seed(seed)
-    loaders = {
-        "train": DataLoader(
-            datasets["train"], batch_size=batch_size, sampler=sampler,
-            num_workers=workers, pin_memory=device.type == "cuda",
-            persistent_workers=workers > 0, worker_init_fn=seed_worker,
-            generator=generator,
-        ),
-        "val": DataLoader(
-            datasets["val"], batch_size=batch_size, shuffle=False,
-            num_workers=workers, pin_memory=device.type == "cuda",
-            persistent_workers=workers > 0, worker_init_fn=seed_worker,
-        ),
-        "test": DataLoader(
-            datasets["test"], batch_size=batch_size, shuffle=False,
-            num_workers=workers, pin_memory=device.type == "cuda",
-            persistent_workers=workers > 0, worker_init_fn=seed_worker,
-        ),
-    }
+        if not split_rows:
+            raise ValueError(f"{name} split is empty.")
 
-    try:
-        model = ResNet18AccidentNet(
-            pretrained_backbone=bool(settings.get("pretrained", True))
-        ).to(device)
-    except Exception as error:
-        raise RuntimeError(
-            "Could not initialize pretrained ResNet-18. Check torchvision and network access "
-            "to download.pytorch.org, or place resnet18-f37072fd.pth in "
-            "torch.hub.get_dir()/checkpoints. Random initialization is not used."
-        ) from error
+        if {row["label"] for row in split_rows} != {0, 1}:
+            raise ValueError(
+                f"{name} split must contain both accident classes."
+            )
 
-    for parameter in model.backbone.parameters():
-        parameter.requires_grad_(False)
-    for parameter in model.backbone.fc.parameters():
-        parameter.requires_grad_(True)
+    print("[SURAKSHAN] Building Keras CNN...", flush=True)
 
-    optimizer = torch.optim.AdamW(
-        [
-            {"params": model.backbone.layer4.parameters(), "lr": float(settings["backbone_learning_rate"])},
-            {"params": model.backbone.fc.parameters(), "lr": float(settings["head_learning_rate"])},
-        ],
-        weight_decay=float(settings["weight_decay"]),
+    model = build_model()
+    model.optimizer.learning_rate.assign(learning_rate)
+
+    print(
+        f"[SURAKSHAN] Parameters: {model.count_params():,}",
+        flush=True,
     )
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="max", factor=0.5, patience=1, min_lr=1e-6
-    )
-    criterion = nn.CrossEntropyLoss()
-    amp_enabled = device.type == "cuda"
-    scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
 
-    epochs = int(settings["epochs"])
-    freeze_epochs = max(0, int(settings.get("freeze_epochs", 2)))
-    patience = int(settings["patience"])
-    recall_target = float(settings.get("recall_target", 0.90))
-    best_score, best_epoch, best_state = -1.0, 0, None
-    best_threshold, best_validation_metrics = 0.5, {}
-    stale_epochs = 0
+    train_weights = make_group_balanced_weights(splits["train"])
+
+    train_dataset = make_dataset(
+        splits["train"],
+        batch_size,
+        training=True,
+        sample_weights=train_weights,
+    )
+
+    val_dataset = make_dataset(
+        splits["val"],
+        batch_size,
+    )
+
     history = []
+    best_f1 = -1.0
+    best_epoch = 0
+    best_threshold = 0.5
+    best_reason = ""
+    stale_epochs = 0
 
     for epoch in range(1, epochs + 1):
-        fine_tuning = epoch > freeze_epochs
-        for parameter in model.backbone.layer4.parameters():
-            parameter.requires_grad_(fine_tuning)
-
-        model.train()
-        # Keep the frozen pretrained feature blocks and their batch-norm stats fixed.
-        model.backbone.eval()
-        model.backbone.fc.train()
-        if fine_tuning:
-            model.backbone.layer4.train()
-
-        epoch_start = time.time()
-        loss_sum, seen, correct = 0.0, 0, 0
-        for images, labels, _, _ in loaders["train"]:
-            images = images.to(device, non_blocking=True)
-            labels = labels.to(device, dtype=torch.long, non_blocking=True)
-            optimizer.zero_grad(set_to_none=True)
-            with torch.autocast(
-                device_type=device.type,
-                dtype=torch.float16 if amp_enabled else torch.bfloat16,
-                enabled=amp_enabled,
-            ):
-                logits = model(images)
-                loss = criterion(logits.float(), labels)
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            nn.utils.clip_grad_norm_([p for p in model.parameters() if p.requires_grad], 1.0)
-            scaler.step(optimizer)
-            scaler.update()
-            loss_sum += float(loss.item()) * labels.size(0)
-            seen += labels.size(0)
-            correct += int((logits.argmax(1) == labels).sum().item())
-
-        train_loss = loss_sum / max(1, seen)
-        train_accuracy = correct / max(1, seen)
-        val_loss, val_frame_accuracy, val_labels, val_probs, _ = evaluate(
-            model, loaders["val"], device, criterion
-        )
-        threshold, threshold_reason = choose_recall_threshold(
-            val_labels, val_probs, recall_target
-        )
-        val_metrics = binary_metrics(val_labels, val_probs, threshold)
-        score = float(val_metrics["f1"])
-        scheduler.step(score)
-        row = {
-            "epoch": epoch,
-            "phase": "layer4_finetune" if fine_tuning else "frozen_backbone_head_only",
-            "train_loss": train_loss,
-            "val_loss": val_loss,
-            "train_frame_accuracy": train_accuracy,
-            "val_frame_accuracy": val_frame_accuracy,
-            "val_window_metrics": val_metrics,
-            "threshold_reason": threshold_reason,
-            "learning_rates": [group["lr"] for group in optimizer.param_groups],
-            "seconds": round(time.time() - epoch_start, 2),
-        }
-        history.append(row)
         print(
-            f"Epoch {epoch}/{epochs} phase={row['phase']} "
-            f"train_loss={train_loss:.4f} train_frame_acc={train_accuracy:.3f} "
-            f"val_window_recall={val_metrics['recall']:.3f} "
-            f"val_window_precision={val_metrics['precision']:.3f} "
-            f"val_window_f1={val_metrics['f1']:.3f} threshold={threshold:.3f} "
-            f"({threshold_reason})",
+            f"\n[SURAKSHAN] Epoch {epoch}/{epochs}",
             flush=True,
         )
-        atomic_torch_save(
-            {"model": model.state_dict(), "optimizer": optimizer.state_dict(),
-             "scaler": scaler.state_dict(), "epoch": epoch, "history": history,
-             "config": config},
-            model_root / "resnet18_last_checkpoint.pth",
-        )
-        (model_root / "resnet18_training_history.json").write_text(
-            json.dumps(history, indent=2), encoding="utf-8"
-        )
-        save_history_plots(history, results_root, prefix="resnet18_")
 
-        if score > best_score:
-            best_score, best_epoch = score, epoch
-            best_threshold, best_validation_metrics = threshold, val_metrics
-            best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
-            checkpoint = make_checkpoint(
-                model, config, threshold, epoch, val_metrics, seed
-            )
-            checkpoint["state_dict"] = best_state
-            checkpoint["validation_threshold_reason"] = threshold_reason
-            atomic_torch_save(checkpoint, model_root / "resnet18_best.pth")
+        start_time = time.time()
+
+        train_result = model.fit(
+            train_dataset,
+            epochs=1,
+            verbose=1,
+        )
+
+        train_loss = float(train_result.history["loss"][-1])
+        train_accuracy = float(train_result.history["accuracy"][-1])
+
+        val_probabilities = predict_probabilities(
+            model,
+            splits["val"],
+            batch_size,
+        )
+
+        val_labels, val_window_probs, _ = aggregate_windows(
+            splits["val"],
+            val_probabilities,
+        )
+
+        threshold, reason, val_metrics = choose_threshold(
+            val_labels,
+            val_window_probs,
+            recall_target,
+        )
+
+        elapsed = round(time.time() - start_time, 2)
+
+        epoch_result = {
+            "epoch": epoch,
+            "train_loss": train_loss,
+            "train_frame_accuracy": train_accuracy,
+            "validation_window_metrics": val_metrics,
+            "validation_threshold": float(threshold),
+            "threshold_reason": reason,
+            "seconds": elapsed,
+        }
+
+        history.append(epoch_result)
+
+        print(
+            f"Train loss={train_loss:.4f} "
+            f"Train accuracy={train_accuracy:.4f} "
+            f"Val recall={val_metrics['recall']:.4f} "
+            f"Val precision={val_metrics['precision']:.4f} "
+            f"Val F1={val_metrics['f1']:.4f} "
+            f"Threshold={threshold:.4f}",
+            flush=True,
+        )
+
+        if val_metrics["f1"] > best_f1:
+            best_f1 = val_metrics["f1"]
+            best_epoch = epoch
+            best_threshold = threshold
+            best_reason = reason
             stale_epochs = 0
+
+            model.save_weights(str(MODEL_PATH))
+
+            save_json(
+                RESULTS_ROOT / "training_history.json",
+                history,
+            )
+
+            print(
+                f"[SURAKSHAN] Saved best weights: {MODEL_PATH}",
+                flush=True,
+            )
+
         else:
             stale_epochs += 1
-            if stale_epochs >= patience:
-                print(f"Early stopping at epoch {epoch}; best validation epoch {best_epoch}.", flush=True)
-                break
 
-    if best_state is None:
-        raise RuntimeError("Training produced no valid ResNet-18 checkpoint")
+        if stale_epochs >= patience:
+            print(
+                f"[SURAKSHAN] Early stopping. Best epoch: {best_epoch}",
+                flush=True,
+            )
+            break
 
-    # Test data is first read after the model and threshold are selected on validation.
-    model.load_state_dict(best_state)
-    test_loss, test_frame_accuracy, test_labels, test_probs, test_windows = evaluate(
-        model, loaders["test"], device, criterion
+    if best_epoch == 0:
+        raise RuntimeError("Training did not produce a valid model.")
+
+    # Reload the best validation-selected model before test evaluation.
+    model.load_weights(str(MODEL_PATH))
+
+    print("\n[SURAKSHAN] Evaluating held-out test split...", flush=True)
+
+    test_probabilities = predict_probabilities(
+        model,
+        splits["test"],
+        batch_size,
     )
-    test_metrics = binary_metrics(test_labels, test_probs, best_threshold)
-    tn, fp = test_metrics["confusion_matrix"][0]
-    fn, tp = test_metrics["confusion_matrix"][1]
+
+    test_labels, test_window_probs, test_window_ids = aggregate_windows(
+        splits["test"],
+        test_probabilities,
+    )
+
+    test_metrics = calculate_metrics(
+        test_labels,
+        test_window_probs,
+        best_threshold,
+    )
+
     test_metrics.update({
-        "evaluation_unit": "annotated temporal window; mean sampled-frame probability",
-        "test_loss_by_frame": test_loss,
-        "test_frame_accuracy": test_frame_accuracy,
-        "threshold_reason": "selected on validation only",
+        "evaluation_unit": "annotated video window",
         "best_epoch": best_epoch,
-        "source_window_count": len(test_windows),
-        "accident_precision": test_metrics["precision"],
-        "accident_recall": test_metrics["recall"],
-        "non_accident_precision": tn / max(1, tn + fn),
-        "false_negative_rate": fn / max(1, fn + tp),
-        "false_negatives": fn,
-    })
-    report, _ = classification_report(
-        test_labels, test_probs, best_threshold, unit_name="annotated-window aggregated"
-    )
-    (results_root / "resnet18_classification_report.txt").write_text(report, encoding="utf-8")
-    (results_root / "resnet18_test_metrics.json").write_text(
-        json.dumps(test_metrics, indent=2), encoding="utf-8"
-    )
-    save_confusion_matrix(
-        test_metrics, results_root,
-        title="Held-out test annotated-window confusion matrix",
-        filename="resnet18_confusion_matrix.png",
-    )
-    best_checkpoint = {
-        "model_type": "resnet18_accident",
-        "state_dict": best_state,
-        "class_to_idx": CLASS_TO_IDX,
         "threshold": float(best_threshold),
-        "threshold_objective": "validation accident recall target; fallback best validation F1",
-        "image_size": image_size,
-        "mean": [0.485, 0.456, 0.406],
-        "std": [0.229, 0.224, 0.225],
-        "preprocessing": "OpenCV BGR to RGB; aspect-preserving 224x224 letterbox; ImageNet normalization",
-        "architecture": "TorchVision ResNet-18 ImageNet backbone with a new binary head",
+        "threshold_selected_on": "validation split",
+        "source_window_count": len(test_window_ids),
+    })
+
+    metadata = {
+        "model_type": "keras_accident_cnn",
+        "architecture": "Surakshan Keras CNN",
+        "image_size": IMAGE_SIZE,
+        "input_shape": [IMAGE_SIZE, IMAGE_SIZE, 1],
+        "class_to_idx": CLASS_TO_IDX,
+        "preprocessing": (
+            "OpenCV BGR to grayscale; resize 128x128 using INTER_AREA; "
+            "float32 normalization to 0-1"
+        ),
+        "threshold": float(best_threshold),
+        "threshold_reason": best_reason,
         "best_epoch": best_epoch,
-        "validation_window_metrics": best_validation_metrics,
-        "validation_threshold_reason": "selected on validation only",
+        "validation_f1": float(best_f1),
         "test_metrics": test_metrics,
-        "consecutive_positive_frames": int(config.get("inference", {}).get("consecutive_positive_frames", 3)),
         "seed": seed,
-        "config": config,
     }
-    atomic_torch_save(best_checkpoint, model_root / "resnet18_best.pth")
-    print("Held-out test metrics:", json.dumps(test_metrics, indent=2), flush=True)
-    print(f"Fresh best checkpoint: {model_root / 'resnet18_best.pth'}", flush=True)
+
+    save_json(
+        RESULTS_ROOT / "model_metadata.json",
+        metadata,
+    )
+
+    save_json(
+        RESULTS_ROOT / "training_history.json",
+        history,
+    )
+
+    save_json(
+        RESULTS_ROOT / "test_metrics.json",
+        test_metrics,
+    )
+
+    print("\n[SURAKSHAN] Training complete.", flush=True)
+    print(f"Best epoch: {best_epoch}", flush=True)
+    print(f"Threshold: {best_threshold:.4f}", flush=True)
+    print(
+        "Test metrics:",
+        json.dumps(test_metrics, indent=2),
+        flush=True,
+    )
+    print(f"Weights: {MODEL_PATH}", flush=True)
 
 
 if __name__ == "__main__":

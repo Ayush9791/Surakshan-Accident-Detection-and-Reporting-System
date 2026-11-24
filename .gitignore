@@ -23,7 +23,6 @@ dataset/resnet18_frames/
 dataset/frame_split_manifest.json
 dataset/dataset_stats.json
 vid_dataset/
-models/
 results/
 logs/*.log
 data/*.db
