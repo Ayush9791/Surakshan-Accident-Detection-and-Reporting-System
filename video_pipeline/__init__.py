@@ -1,1 +1,1 @@
-"""Video data preparation, loading, metrics, and training helpers."""
+"""Source-video auditing and frame preprocessing utilities."""
