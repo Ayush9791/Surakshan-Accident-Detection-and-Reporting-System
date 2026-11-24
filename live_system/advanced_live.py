@@ -60,11 +60,15 @@ def main():
             recorders[cam_id] = Recorder()
             gates[cam_id] = IncidentGate()
 
-        print("[SURAKSHAN] Live detection started. Press ESC to stop.", flush=True)
+        headless = os.environ.get("SURAKSHAN_HEADLESS", "0").strip().lower() in {"1", "true", "yes"}
+        print(f"[SURAKSHAN] Live detection started. Headless={headless}", flush=True)
         while True:
             for cam_id, stream in streams.items():
                 ret, frame = stream.read()
                 if not ret or frame is None:
+                    if SOURCE_MODE == "video-file":
+                        print("[VIDEO] Reached end of test clip.", flush=True)
+                        return
                     continue
 
                 details = predict_frame_details(frame, stream_id=cam_id)
@@ -97,8 +101,9 @@ def main():
                         incident_timestamp=details.get("incident_timestamp"),
                     )
 
-                cv2.imshow(cam_id, frame)
-            if cv2.waitKey(1) & 0xFF == 27:
+                if not headless:
+                    cv2.imshow(cam_id, frame)
+            if not headless and cv2.waitKey(1) & 0xFF == 27:
                 break
     finally:
         for stream in streams.values():
@@ -107,7 +112,8 @@ def main():
             reset_predictor(cam_id)
         for recorder in recorders.values():
             recorder.close()
-        cv2.destroyAllWindows()
+        if os.environ.get("SURAKSHAN_HEADLESS", "0").strip().lower() not in {"1", "true", "yes"}:
+            cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
