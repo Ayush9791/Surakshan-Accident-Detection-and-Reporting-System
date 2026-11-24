@@ -22,9 +22,9 @@ export default function Dashboard() {
   const [busy, setBusy] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraError, setCameraError] = useState("");
-  const [cameraSource, setCameraSource] = useState("pc-camera");
+  const [cameraSource, setCameraSource] = useState("video-file");
   const [ipCameraUrl, setIpCameraUrl] = useState("http://10.63.101.159:8080/video");
-  const [videoPath, setVideoPath] = useState("");
+  const [videoPath, setVideoPath] = useState("Accident_Detection.mp4");
   const [newUser, setNewUser] = useState({ username: "", password: "", role: "hospital", organization: "" });
   const [assignOrg, setAssignOrg] = useState("");
   const [apiOnline, setApiOnline] = useState(false);
@@ -249,7 +249,7 @@ export default function Dashboard() {
         options.body = JSON.stringify({
           source: cameraSource,
           camera_url: ipCameraUrl,
-          video_path: videoPath,
+          video_path: cameraSource === "video-file" ? "Accident_Detection.mp4" : videoPath,
         });
       }
       const response = await authFetch(`/detector/${action}`, options);
@@ -348,15 +348,11 @@ export default function Dashboard() {
                 <select value={cameraSource} disabled={detectorRunning || busy} onChange={event => { setCameraSource(event.target.value); setCameraOn(false); setCameraError(""); }}>
                   <option value="pc-camera">PC Webcam (camera 0)</option>
                   <option value="ip-webcam">Android IP Webcam</option>
-                  <option value="video-file">Video file on detector PC</option>
+                  <option value="video-file">Bundled accident test video</option>
                 </select>
               </label>
-              {cameraSource === "ip-webcam" && <label className="field-label">IP Webcam stream URL
-                <input value={ipCameraUrl} onChange={event => setIpCameraUrl(event.target.value)} placeholder="http://192.168.1.105:8080/video" disabled={detectorRunning || busy}/>
-              </label>}
-              {cameraSource === "video-file" && <label className="field-label">Video file path on detector PC
-                <input value={videoPath} onChange={event => setVideoPath(event.target.value)} placeholder="C:\\Surakshan\\videos\\traffic.mp4" disabled={detectorRunning || busy}/>
-              </label>}
+
+              {cameraSource === "video-file" && <div className="inline-note">Using the bundled test clip: Accident_Detection.mp4</div>}
               <div className="camera-control-buttons">
                 {cameraSource === "ip-webcam" && <button className="button button-quiet" disabled={detectorRunning || busy} onClick={() => { setCameraError(""); setCameraOn(value => !value); }}>{cameraOn ? "Stop preview" : "Preview IP camera"}</button>}
                 {user.role !== "hospital" && <button className={detectorRunning ? "button button-secondary" : "button button-primary"} disabled={busy} onClick={() => detectorAction(detectorRunning ? "stop" : "start")}>{detectorRunning ? "Stop AI detector" : "Start AI detector"}</button>}
