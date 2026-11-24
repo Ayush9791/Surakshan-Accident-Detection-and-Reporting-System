@@ -42,8 +42,25 @@ IMAGE_SIZE = 128
 ACCIDENT_INDEX = 0
 NON_ACCIDENT_INDEX = 1
 
+METADATA_PATH = MODEL_PATH.parent / "model_metadata.json"
+
+
+def _load_default_threshold():
+    if METADATA_PATH.is_file():
+        import json
+        try:
+            metadata = json.loads(METADATA_PATH.read_text(encoding="utf-8"))
+            value = float(metadata["threshold"])
+            if 0.0 <= value <= 1.0:
+                print(f"[SURAKSHAN] Loaded validation threshold {value:.4f} from {METADATA_PATH}", flush=True)
+                return value
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
+            print(f"[SURAKSHAN] Could not read model threshold metadata: {error}", flush=True)
+    return 0.93
+
+
 ACCIDENT_THRESHOLD = float(
-    os.environ.get("SURAKSHAN_ACCIDENT_THRESHOLD", "0.93")
+    os.environ.get("SURAKSHAN_ACCIDENT_THRESHOLD", str(_load_default_threshold()))
 )
 
 FRAME_INTERVAL_SECONDS = float(
