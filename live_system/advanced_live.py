@@ -1,7 +1,7 @@
 """Run Surakshan inference against a local camera or the bundled accident test clip.
 
 The bundled clip is stored at the repository root as Accident_Detection.mp4.
-This entry point does not open GUI windows, so it also works on headless hosts.
+On local Windows runs it opens an OpenCV preview window; headless hosts disable the window.
 """
 import os
 import time
@@ -20,6 +20,8 @@ from live_system.recorder import Recorder
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BUNDLED_VIDEO_PATH = PROJECT_ROOT / "Accident_Detection.mp4"
 SOURCE_MODE = os.environ.get("SURAKSHAN_CAMERA_SOURCE", "bundled-video").strip().lower()
+HEADLESS = os.environ.get("SURAKSHAN_HEADLESS", "0" if os.name == "nt" else "1").strip().lower() in {"1", "true", "yes"}
+WINDOW_NAME = "Surakshan AI - Accident Detection"
 
 if SOURCE_MODE == "bundled-video":
     if not BUNDLED_VIDEO_PATH.is_file():
@@ -80,6 +82,12 @@ def main():
                 color = (0, 0, 255) if label == "ACCIDENT" else (0, 255, 0)
                 cv2.putText(frame, f"{cam_id}: {label} ({details['confidence']:.0%})",
                             (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+                if not HEADLESS:
+                    cv2.imshow(WINDOW_NAME, frame)
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        print("[SURAKSHAN] Preview closed by user (Q). Stopping detector.", flush=True)
+                        return
+
                 recorder = recorders[cam_id]
                 recorder.add_frame(frame)
 
@@ -106,6 +114,8 @@ def main():
             reset_predictor(cam_id)
         for recorder in recorders.values():
             recorder.close()
+        if not HEADLESS:
+            cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
